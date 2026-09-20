@@ -1,0 +1,13 @@
+export { GeneralTab } from './GeneralTab';
+export { AccountTab } from './AccountTab';
+export { UpgradePlanTab } from './UpgradePlanTab';
+export { ComputerAwarenessTab } from './ComputerAwarenessTab';
+export { PermissionsTab } from './PermissionsTab';
+export { NotificationsTab } from './NotificationsTab';
+export { PersonalizationTab } from './PersonalizationTab';
+export { VoiceTab } from './VoiceTab';
+export { AgentTaskManagerTab } from './AgentTaskManagerTab';
+export { SafetyTab } from './SafetyTab';
+export { SecurityLoginTab } from './SecurityLoginTab';
+export { StorageTab } from './StorageTab';
+export { DataControlsTab } from './DataControlsTab';

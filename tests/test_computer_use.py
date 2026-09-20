@@ -28,6 +28,17 @@ from nexus.tools.computer_use import (
 )
 
 
+@pytest.fixture(autouse=True)
+def enable_computer_use_permissions():
+    """Ensure computer control scopes are enabled for testing."""
+    from nexus.security.permissions import PermissionScope, PermissionScopeManager
+    perm_mgr = PermissionScopeManager()
+    perm_mgr.grant_scope(PermissionScope.MOUSE_CONTROL)
+    perm_mgr.grant_scope(PermissionScope.KEYBOARD_CONTROL)
+    perm_mgr.grant_scope(PermissionScope.APP_CONTROL)
+    yield
+
+
 @pytest.mark.asyncio
 async def test_action_executor_bounds_and_click():
     """Test that coordinates are clamped safely within screen bounds."""
@@ -138,6 +149,8 @@ async def test_conversational_computer_use_agent_loop():
             },
         ]
     )
+
+    agent._classify_intent = AsyncMock(return_value="TASK")
 
     # Test Steering
     await agent.steer("Please make sure to save first")
@@ -257,6 +270,8 @@ async def test_computer_use_open_close_loop_detection():
         ]
     )
 
+    agent._classify_intent = AsyncMock(return_value="TASK")
+
     with patch("pyautogui.hotkey", create=True), patch("subprocess.Popen", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
         res = await agent.run_goal("camera open panni close pannu")
         # Should be auto-completed by loop detection on step 3!
@@ -272,6 +287,7 @@ async def test_outer_task_keeps_app_open():
 
     mock_obs = ScreenObservation(screen_width=1920, screen_height=1080, detected_elements=[])
     agent._grounding.observe_screen = AsyncMock(return_value=mock_obs)
+    agent._classify_intent = AsyncMock(return_value="TASK")
     agent._decide_next_action = AsyncMock(
         side_effect=[
             {
@@ -315,6 +331,7 @@ async def test_outer_task_explicit_close():
 
     mock_obs = ScreenObservation(screen_width=1920, screen_height=1080, detected_elements=[])
     agent._grounding.observe_screen = AsyncMock(return_value=mock_obs)
+    agent._classify_intent = AsyncMock(return_value="TASK")
     agent._decide_next_action = AsyncMock(
         side_effect=[
             {
@@ -370,6 +387,7 @@ async def test_inner_task_protection_and_subtasks():
         ],
     )
     agent._grounding.observe_screen = AsyncMock(return_value=mock_obs)
+    agent._classify_intent = AsyncMock(return_value="TASK")
 
     # Subtask execution: 1.1 click 3-dot(hello) -> 1.2 click delete -> 2.1 click 3-dot(hiii) -> 2.2 click delete -> finish
     agent._decide_next_action = AsyncMock(

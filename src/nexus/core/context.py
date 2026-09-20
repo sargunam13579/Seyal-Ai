@@ -49,11 +49,19 @@ class ContextManager:
         """Get the current system prompt."""
         return self._system_prompt
 
+    def _trim_messages(self) -> None:
+        """Trim oldest messages when exceeding max_turns user turns."""
+        if self._max_turns <= 0:
+            return
+        while self.turn_count > self._max_turns and len(self._messages) > 1:
+            self._messages.popleft()
+
     def add_user_message(self, content: str) -> None:
         """Add a user message to the context."""
         self._messages.append(
             LLMMessage(role="user", content=content)
         )
+        self._trim_messages()
 
     def add_assistant_message(self, content: str) -> None:
         """Add an assistant response to the context."""

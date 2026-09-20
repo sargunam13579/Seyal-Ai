@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Power, Activity, ArrowLeft } from 'lucide-react';
+import { Power, Activity } from 'lucide-react';
 import { useNexus } from '../../context/NexusContext';
 import { useVoice } from '../../context/VoiceContext';
 import { SoundWaveVisualizer } from '../common/SoundWaveVisualizer';
-import { api } from '../../services/api';
 import appLogo from '../../assets/app-logo.png';
 
 export const Header: React.FC = () => {
@@ -11,9 +10,14 @@ export const Header: React.FC = () => {
     identity,
     health,
     triggerEmergencyStop,
-    setIsComputerUseActive,
+    openHeroLogo,
+    closeHeroLogo,
+    isHeroLogoOpen,
+    isHeroLogoClosing,
+    setActiveView,
+    activeView,
   } = useNexus();
-  const { voiceState, stopSpeaking } = useVoice();
+  const { voiceState } = useVoice();
   const [timeStr, setTimeStr] = useState<string>('');
   const [dateStr, setDateStr] = useState<string>('');
 
@@ -44,15 +48,6 @@ export const Header: React.FC = () => {
   }, []);
 
   const assistantName = identity?.assistant_name || 'Seyal AI';
-
-  const handleBackToSimpleChat = () => {
-    stopSpeaking();
-    api.stopComputerUse().catch(() => {});
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    setIsComputerUseActive(false);
-  };
 
   return (
     <header className="glass-panel rounded-none border-t-0 border-x-0 border-b border-cyan-500/20 px-5 py-2.5 flex items-center justify-between z-30 sticky top-0 bg-slate-950/85 backdrop-blur-xl">
@@ -110,32 +105,35 @@ export const Header: React.FC = () => {
           <span className="hidden sm:inline">KILL SWITCH</span>
         </button>
 
-        {/* Back to Simple Chat */}
+        {/* Conversational Computer Use Agent Logo (Click to open/toggle Center Hero Logo Popup) */}
         <button
-          onClick={handleBackToSimpleChat}
-          title="Return to Simple Chatbot"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-700/70 hover:border-cyan-500/50 hover:bg-slate-800/80 text-slate-300 hover:text-cyan-300 transition-all text-xs font-medium group shrink-0"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (activeView !== 'assistant' && activeView !== 'computer_use') {
+              setActiveView('assistant');
+              openHeroLogo();
+            } else if (isHeroLogoOpen && !isHeroLogoClosing) {
+              closeHeroLogo();
+            } else {
+              openHeroLogo();
+            }
+          }}
+          className="relative shrink-0 group focus:outline-none cursor-pointer transition-transform hover:scale-110 active:scale-95"
+          title={isHeroLogoOpen && !isHeroLogoClosing ? "Click to close Center Hero Logo Popup" : "Click to open Center Hero Logo Popup"}
+          id="header-hero-logo-btn"
         >
-          <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-          <span className="hidden sm:inline whitespace-nowrap">Back to Simple Chat</span>
-        </button>
-
-        {/* Conversational Computer Use Agent Logo */}
-        <div
-          className="relative shrink-0"
-          title="Conversational Computer-Use Agent Active"
-        >
-          <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-cyan-400/60 shadow-[0_0_14px_rgba(0,240,255,0.5)] bg-slate-950">
+          <div className={`w-9 h-9 rounded-full overflow-hidden border-2 shadow-[0_0_14px_rgba(0,240,255,0.5)] group-hover:shadow-[0_0_22px_rgba(0,240,255,0.8)] bg-slate-950 transition-all duration-300 ${isHeroLogoOpen && !isHeroLogoClosing ? 'border-cyan-400 ring-2 ring-cyan-400/40' : 'border-cyan-400/60 group-hover:border-cyan-300'}`}>
             <img
               src={appLogo}
               alt="Seyal AI Agent"
-              className="w-full h-full object-cover rounded-full"
+              className="w-full h-full object-cover rounded-full group-hover:rotate-6 transition-transform duration-300"
             />
           </div>
           {/* Active glow badge */}
           <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-cyan-400 border-2 border-slate-950 animate-ping" />
           <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-cyan-400 border-2 border-slate-950" />
-        </div>
+        </button>
 
       </div>
     </header>

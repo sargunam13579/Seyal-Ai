@@ -55,9 +55,9 @@ class VoiceActivityDetector:
         self,
         sample_rate: int = 16000,
         threshold: float = 0.5,
-        silence_threshold_ms: int = 1500,
+        silence_threshold_ms: int = 1800,
         min_speech_ms: int = 250,
-        energy_threshold: int = 300,
+        energy_threshold: int = 100,
     ) -> None:
         """
         Args:
@@ -65,16 +65,21 @@ class VoiceActivityDetector:
             threshold: Silero VAD confidence threshold (0.0–1.0).
             silence_threshold_ms: How long silence must last to end speech.
             min_speech_ms: Minimum speech duration to trigger a segment.
-            energy_threshold: RMS energy below this is considered silence.
+            energy_threshold: RMS energy required to trigger speech start.
         """
+        from collections import deque
+
         self._sample_rate = sample_rate
         self._threshold = threshold
         self._silence_threshold_ms = silence_threshold_ms
         self._min_speech_ms = min_speech_ms
         self._energy_threshold = energy_threshold
+        # Hysteresis: once speech begins, keep speech active down to soft whisper/consonant levels (~40 RMS)
+        self._sustain_energy_threshold = max(35, int(energy_threshold * 0.45))
 
         self._state = VADState.IDLE
         self._speech_chunks: list[np.ndarray] = []
+        self._preroll_chunks: deque[np.ndarray] = deque(maxlen=4)  # ~128ms pre-speech buffer
         self._speech_start_time: float | None = None
         self._last_speech_time: float | None = None
 
@@ -85,17 +90,18 @@ class VoiceActivityDetector:
         self._load_vad_model()
 
     def _load_vad_model(self) -> None:
-        """Attempt to load the Silero VAD model."""
+        """Attempt to load the Silero VAD model without blocking on interactive prompts."""
         try:
             import importlib
 
             torch: Any = importlib.import_module("torch")
 
+            # Check if cached locally to avoid hanging on internet or trust prompts
             hub_load_fn: Any = torch.hub.load
             hub_result: Any = hub_load_fn(
                 repo_or_dir="snakers4/silero-vad",
                 model="silero_vad",
-                trust_repo="check",
+                trust_repo=True,
                 verbose=False,
             )
             if isinstance(hub_result, (tuple, list)):
@@ -105,7 +111,7 @@ class VoiceActivityDetector:
             self._use_silero = True
             log.info("Silero VAD model loaded successfully")
         except Exception as e:
-            log.warning("Silero VAD unavailable (%s), using energy-based detection", e)
+            log.debug("Silero VAD not loaded (%s), using calibrated energy hysteresis detection", e)
             self._use_silero = False
 
     def _compute_energy(self, chunk: np.ndarray) -> float:
@@ -132,14 +138,10 @@ class VoiceActivityDetector:
                 chunk_float = chunk.astype(np.float32)
 
             tensor = torch.from_numpy(chunk_float)
-            # Silero VAD expects 512 samples at 16kHz (32ms windows)
-            # Process in windows if chunk is larger
             window_size = 512
             if len(tensor) < window_size:
-                # Pad short chunks
                 tensor = torch.nn.functional.pad(tensor, (0, window_size - len(tensor)))
             if len(tensor) > window_size:
-                # Use the last window
                 tensor = tensor[-window_size:]
 
             prob = self._silero_model(tensor, self._sample_rate).item()
@@ -150,7 +152,7 @@ class VoiceActivityDetector:
 
     def process_chunk(self, chunk: np.ndarray) -> VADState:
         """
-        Process an audio chunk and return the current VAD state.
+        Process an audio chunk and return the current VAD state with hysteresis.
 
         Args:
             chunk: Audio samples as numpy array.
@@ -161,24 +163,30 @@ class VoiceActivityDetector:
         now = time.time()
         energy = self._compute_energy(chunk)
 
-        # Energy pre-filter: skip Silero for obvious silence
-        if energy < self._energy_threshold:
-            is_speech = False
-        elif self._use_silero:
-            prob = self._run_silero(chunk)
-            is_speech = prob >= self._threshold
+        # Dynamic Hysteresis:
+        # If already speaking, use sustain threshold (prevents soft consonants like 'p', 'k', 'th' from cutting off)
+        # If idle, use speech start threshold (prevents ambient fan/noise triggers)
+        if self._state == VADState.SPEECH:
+            is_speech = energy >= self._sustain_energy_threshold
+            if not is_speech and self._use_silero:
+                prob = self._run_silero(chunk)
+                is_speech = prob >= (self._threshold * 0.7)
         else:
-            # Fallback: pure energy-based detection
-            is_speech = energy >= self._energy_threshold * 2
+            is_speech = energy >= self._energy_threshold
+            if is_speech and self._use_silero:
+                prob = self._run_silero(chunk)
+                is_speech = prob >= self._threshold
 
         if is_speech:
             self._last_speech_time = now
 
             if self._state != VADState.SPEECH:
-                # Transition to speech
+                # Transition from IDLE to SPEECH
                 self._state = VADState.SPEECH
                 self._speech_start_time = now
-                self._speech_chunks = []
+                # Include pre-roll buffer so the very beginning consonant is preserved
+                self._speech_chunks = list(self._preroll_chunks)
+                self._preroll_chunks.clear()
                 log.debug("VAD: Speech started (energy=%.0f)", energy)
 
             self._speech_chunks.append(chunk.copy())
@@ -186,10 +194,10 @@ class VoiceActivityDetector:
 
         else:
             if self._state == VADState.SPEECH:
-                # Still accumulate silence chunks (might be a pause)
+                # Still accumulate silence chunks during natural conversational pauses
                 self._speech_chunks.append(chunk.copy())
 
-                # Check if silence has lasted long enough to end speech
+                # Check if silence has lasted long enough to conclude utterance
                 if self._last_speech_time is not None:
                     silence_duration_ms = (now - self._last_speech_time) * 1000
                     if (
@@ -205,13 +213,15 @@ class VoiceActivityDetector:
                             )
                             return VADState.SILENCE
                         else:
-                            # Too short, discard
+                            # Too short, discard click/bump
                             self._state = VADState.IDLE
                             self._speech_chunks = []
                             return VADState.IDLE
 
-                return VADState.SPEECH  # Still in speech, waiting for silence
+                return VADState.SPEECH  # Still in speech, waiting for natural silence boundary
 
+            # Maintain pre-roll buffer during IDLE
+            self._preroll_chunks.append(chunk.copy())
             return VADState.IDLE
 
     def get_speech_segment(self) -> np.ndarray | None:

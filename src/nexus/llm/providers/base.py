@@ -109,6 +109,28 @@ class BaseLLMProvider(ABC):
         """
         ...
 
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        model: str,
+        tools: list[ToolSchema] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ):
+        """
+        Generate a streaming response from the LLM, yielding text chunks as they arrive.
+        Default implementation falls back to yielding the full text from generate().
+        """
+        resp = await self.generate(
+            messages=messages,
+            model=model,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if resp.content:
+            yield resp.content
+
     @abstractmethod
     async def check_availability(self) -> bool:
         """Check if the provider is available and configured."""

@@ -8,14 +8,20 @@ live conversational steering, screen element inspection, and emergency controls.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from nexus.agents.computer_use.actions import ComputerActionExecutor
-from nexus.agents.computer_use.agent import ConversationalComputerUseAgent
+from nexus.agents.computer_use.agent import (
+    ConversationalComputerUseAgent,
+    UNIVERSAL_CONVO_FALLBACK,
+    generate_task_acknowledgment,
+)
 from nexus.agents.computer_use.protocol import (
     ActionType,
     AgentStatus,
@@ -90,6 +96,7 @@ async def _persist_computer_use_turn(
     narration: str,
     status: str,
     steps_count: int,
+    brain: Any | None = None,
 ) -> None:
     """Non-blocking background helper to persist computer-use conversation and messages to Supabase."""
     try:
@@ -116,8 +123,21 @@ async def _persist_computer_use_turn(
                     session.add(db_session)
                     await session.flush()
 
-                clean_goal = goal.strip()
-                clean_summary = f"[Computer-Use] {clean_goal[:35]}" + ("..." if len(clean_goal) > 35 else "")
+                # Gather existing titles in agent category for strict uniqueness
+                all_convs, _ = await repo.list_conversations(offset=0, limit=200)
+                existing_titles = {
+                    (c.summary or "").replace("[Computer-Use]", "").strip().lower()
+                    for c in all_convs
+                    if (c.summary or "").startswith("[Computer-Use]")
+                }
+                from nexus.services.title_service import generate_ai_title_for_first_turn
+                clean_initial_title = await generate_ai_title_for_first_turn(
+                    first_message=goal,
+                    existing_category_titles=existing_titles,
+                    brain=brain,
+                    is_computer_use=True,
+                )
+                clean_summary = f"[Computer-Use] {clean_initial_title}"
                 conv = await repo.create_conversation(
                     session_id=db_session.id,
                     summary=clean_summary,
@@ -131,12 +151,26 @@ async def _persist_computer_use_turn(
             )
             await repo.add_message(conversation_id=conv.id, role="assistant", content=assistant_content)
             await session.commit()
+
+            # Trigger periodic dynamic title evaluation in background if due
+            from nexus.services.title_service import run_periodic_title_update_if_needed
+            await run_periodic_title_update_if_needed(
+                conversation_id=conv.id,
+                session=session,
+                repo=repo,
+                brain=brain,
+                is_computer_use=True,
+            )
     except Exception as db_err:
         log.warning("Computer-Use background database persistence notice: %s", db_err)
 
 
 @router.post("/run")
-async def run_computer_use_goal(req: RunGoalRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+async def run_computer_use_goal(
+    req: RunGoalRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+) -> dict[str, Any]:
     """Start an autonomous conversational computer-use goal or handle stop commands."""
     agent = get_agent()
     goal_lower = req.goal.strip().lower()
@@ -168,6 +202,7 @@ async def run_computer_use_goal(req: RunGoalRequest, background_tasks: Backgroun
     steps_taken = len(result.get("history", []))
     final_narr = result.get("narration") or ""
     final_status = result.get("status", "completed")
+    brain = getattr(request.app.state, "brain", None)
 
     asyncio.create_task(
         _persist_computer_use_turn(
@@ -176,11 +211,142 @@ async def run_computer_use_goal(req: RunGoalRequest, background_tasks: Backgroun
             narration=final_narr,
             status=final_status,
             steps_count=steps_taken,
+            brain=brain,
         )
     )
 
     result["conversation_id"] = active_conv_id
     return result
+
+
+@router.post("/stream")
+async def stream_computer_use_goal(
+    req: RunGoalRequest,
+    request: Request,
+):
+    """
+    Stream conversational or computer-use responses in real-time using Server-Sent Events (SSE).
+    """
+    agent = get_agent()
+    goal_lower = req.goal.strip().lower()
+
+    # 1. Stop keywords check
+    stop_keywords = ["stop", "cancel", "halt", "quit", "exit", "stop it", "stop opening", "stop task"]
+    if any(goal_lower == kw or goal_lower.startswith("stop ") or goal_lower.startswith("cancel ") for kw in stop_keywords):
+        agent.request_stop()
+        agent._status = AgentStatus.IDLE
+        async def stop_generator():
+            data = json.dumps({
+                "type": "done",
+                "status": "stopped",
+                "narration": "I have stopped the computer-use operation for you.",
+                "conversation_id": req.conversation_id,
+                "steps_executed": len(agent.history),
+                "is_task": False,
+            })
+            yield f"data: {data}\n\n"
+        return StreamingResponse(stop_generator(), media_type="text/event-stream")
+
+    # 2. Busy handling
+    if agent.status in (AgentStatus.ACTING, AgentStatus.THINKING, AgentStatus.OBSERVING):
+        log.info("Agent is busy; auto-stopping prior task: %s", req.goal)
+        agent.request_stop()
+        await asyncio.sleep(0.3)
+        agent._status = AgentStatus.IDLE
+
+    active_conv_id = req.conversation_id or str(uuid.uuid4())
+    brain = getattr(request.app.state, "brain", None)
+
+    # Classify intent (instantaneous < 0.1ms deterministic routing)
+    intent = await agent._classify_intent(req.goal)
+
+    async def sse_generator():
+        collected_chunks = []
+        if intent in ("CHAT", "CONVERSATION", "CONVERSATION_GREETING"):
+            yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conv_id, 'is_task': False})}\n\n"
+            async for chunk in agent.stream_conversational_query(req.goal):
+                collected_chunks.append(chunk)
+                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+
+            full_text = "".join(collected_chunks).strip() or UNIVERSAL_CONVO_FALLBACK
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conv_id, 'narration': full_text, 'is_task': False, 'status': 'completed'})}\n\n"
+
+            # Background persistence & title service
+            asyncio.create_task(
+                _persist_computer_use_turn(
+                    target_conv_id=active_conv_id,
+                    goal=req.goal,
+                    narration=full_text,
+                    status="completed",
+                    steps_count=0,
+                    brain=brain,
+                )
+            )
+        elif intent == "SYSTEM_WEATHER":
+            yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conv_id, 'is_task': False})}\n\n"
+            res = await agent._handle_weather_query(req.goal)
+            narr = res.get("narration", "")
+            yield f"data: {json.dumps({'type': 'chunk', 'text': narr})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conv_id, 'narration': narr, 'is_task': False, 'status': 'completed'})}\n\n"
+            asyncio.create_task(
+                _persist_computer_use_turn(
+                    target_conv_id=active_conv_id,
+                    goal=req.goal,
+                    narration=narr,
+                    status="completed",
+                    steps_count=0,
+                    brain=brain,
+                )
+            )
+        elif intent == "SYSTEM_BATTERY":
+            yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conv_id, 'is_task': False})}\n\n"
+            res = await agent._handle_battery_query(req.goal)
+            narr = res.get("narration", "")
+            yield f"data: {json.dumps({'type': 'chunk', 'text': narr})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conv_id, 'narration': narr, 'is_task': False, 'status': 'completed'})}\n\n"
+            asyncio.create_task(
+                _persist_computer_use_turn(
+                    target_conv_id=active_conv_id,
+                    goal=req.goal,
+                    narration=narr,
+                    status="completed",
+                    steps_count=0,
+                    brain=brain,
+                )
+            )
+        else:
+            # OS Task execution
+            ack_narration = await generate_task_acknowledgment(req.goal, agent._router)
+            yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conv_id, 'is_task': True})}\n\n"
+            yield f"data: {json.dumps({'type': 'ack', 'text': ack_narration})}\n\n"
+
+            result = await agent.run_goal(goal=req.goal, auto_confirm=req.auto_confirm)
+            final_narr = result.get("narration") or ack_narration
+            steps_taken = len(result.get("history", []))
+            final_status = result.get("status", "completed")
+
+            yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conv_id, 'narration': final_narr, 'is_task': True, 'status': final_status, 'history': result.get('history', []), 'steps_executed': steps_taken})}\n\n"
+
+            asyncio.create_task(
+                _persist_computer_use_turn(
+                    target_conv_id=active_conv_id,
+                    goal=req.goal,
+                    narration=final_narr,
+                    status=final_status,
+                    steps_count=steps_taken,
+                    brain=brain,
+                )
+            )
+
+    return StreamingResponse(
+        sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/steer")

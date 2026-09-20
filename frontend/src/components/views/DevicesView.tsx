@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Smartphone, Laptop, Plus, RefreshCw, ShieldCheck, Wifi } from 'lucide-react';
+import { Laptop, RefreshCw, ShieldCheck, Wifi } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
 import { StatusBadge } from '../common/StatusBadge';
 import { useNexus } from '../../context/NexusContext';
@@ -19,11 +19,11 @@ export const DevicesView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="font-display font-black text-xl text-white tracking-wider flex items-center gap-2">
-            <Smartphone className="w-5 h-5 text-cyan-400" />
-            UNIFIED DEVICE ECOSYSTEM & MESH
+            <Laptop className="w-5 h-5 text-cyan-400" />
+            UNIFIED HOST WORKSTATION & HARDWARE MESH
           </h2>
           <p className="font-tech text-xs text-slate-400 uppercase tracking-widest mt-1">
-            Bi-directional Cross-Device Command Routing & Mobile Companion Links
+            Autonomous Workstation Environment & System Telemetry
           </p>
         </div>
 
@@ -80,57 +80,81 @@ export const DevicesView: React.FC = () => {
           </div>
         </GlassCard>
 
-        {/* Android Node Standby Card */}
-        <GlassCard className="p-5 space-y-4 border-slate-800">
+        {/* Display & Peripherals Node */}
+        <GlassCard glow corners className="p-5 space-y-4">
           <div className="flex items-start justify-between">
             <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-400/30 text-purple-400">
-              <Smartphone className="w-6 h-6" />
+              <Laptop className="w-6 h-6" />
             </div>
-            <StatusBadge status="idle" label="ADB STANDBY" size="sm" />
+            <StatusBadge status="online" label="ACTIVE DISPLAY" size="sm" />
           </div>
 
           <div>
             <h3 className="font-tech font-bold text-lg text-white">
-              Android Companion Node
+              Display & Audio Hardware
             </h3>
             <p className="font-mono text-xs text-slate-400 mt-0.5">
-              ADB USB / WiFi Bridge Ready
+              Primary Screen & Sound Peripherals
             </p>
           </div>
 
           <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5 font-mono text-xs text-slate-300">
             <div className="flex justify-between">
-              <span className="text-slate-500">Protocol:</span>
-              <span className="text-purple-300">FastAPI / Comms Mesh</span>
+              <span className="text-slate-500">Audio In:</span>
+              <span className="text-cyan-300">Microphone (16kHz VAD)</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Permissions:</span>
-              <span className="text-cyan-300">Media, SMS, Camera, UI</span>
+              <span className="text-slate-500">Audio Out:</span>
+              <span className="text-purple-300">Neural Speech Synth</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">File Handoff:</span>
-              <span className="text-emerald-300">Enabled</span>
+              <span className="text-slate-500">Vision Capture:</span>
+              <span className="text-emerald-300">Desktop Screen (Active)</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-tech text-slate-400 pt-1">
-            <Wifi className="w-4 h-4 text-cyan-400" />
-            <span>Standing by for device discovery</span>
+          <div className="flex items-center gap-2 text-xs font-tech text-cyan-400 pt-1">
+            <Wifi className="w-4 h-4" />
+            <span>High-Speed Direct Bus Communication</span>
           </div>
         </GlassCard>
 
-        {/* Register New Node Card */}
-        <GlassCard className="p-5 flex flex-col items-center justify-center text-center space-y-3 border-dashed border-slate-800 hover:border-cyan-500/40 cursor-pointer">
-          <div className="w-12 h-12 rounded-full bg-cyan-500/10 border border-cyan-400/30 flex items-center justify-center text-cyan-400">
-            <Plus className="w-6 h-6" />
+        {/* Security & OS Privileges Card */}
+        <GlassCard glow corners className="p-5 space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-400/30 text-emerald-400">
+              <ShieldCheck className="w-6 h-6" />
+            </div>
+            <StatusBadge status="online" label="VERIFIED" size="sm" />
           </div>
+
           <div>
-            <h4 className="font-tech font-bold text-base text-white">
-              Pair New Ecosystem Node
-            </h4>
-            <p className="font-sans text-xs text-slate-400 mt-1 max-w-xs">
-              Connect external tablets, mobile devices, or secondary agent nodes via secure PIN pairing.
+            <h3 className="font-tech font-bold text-lg text-white">
+              Autonomous Workstation Scope
+            </h3>
+            <p className="font-mono text-xs text-slate-400 mt-0.5">
+              Windows Native Automation Engine
             </p>
+          </div>
+
+          <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5 font-mono text-xs text-slate-300">
+            <div className="flex justify-between">
+              <span className="text-slate-500">Execution Shell:</span>
+              <span className="text-emerald-300">PowerShell / Win32 API</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Installed Tools:</span>
+              <span className="text-cyan-300">72 System & App Tools</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-500">Local Database:</span>
+              <span className="text-purple-300">SQLite Instant Local-First</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs font-tech text-emerald-400 pt-1">
+            <ShieldCheck className="w-4 h-4" />
+            <span>Autonomous Safe Sandboxing Active</span>
           </div>
         </GlassCard>
       </div>

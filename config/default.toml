@@ -29,25 +29,25 @@ base_url = "http://localhost:11434"
 [voice]
 enabled = false                    # Set to true to enable voice
 wake_word = "hey nexus"
-stt_provider = "google_web"        # google_web | vosk
+stt_provider = "multilingual_gemini" # multilingual_gemini | google_web | vosk
 tts_provider = "edge"              # edge | pyttsx3
 interaction_mode = "voice_and_text" # voice_and_text | voice_only | text_only
-silence_threshold_ms = 1500
+silence_threshold_ms = 800         # Responsive natural speech turn-taking
 sample_rate = 16000
 interrupt_enabled = true
-language = "en-US"
-supported_languages = ["en-US"]    # Future: ["en-US", "ta-IN"]
+language = "auto"
+supported_languages = ["auto", "ta-IN", "en-IN", "en-US", "hi-IN"]
 
 [voice.whisper]
 model_size = "base"                # tiny | base | small | medium | large
 
 [voice.stt]
-language = "en-US"
-supported_languages = ["en-US"]
+language = "auto"
+supported_languages = ["auto", "ta-IN", "en-IN", "en-US", "hi-IN"]
 
 [voice.tts]
-voice = "en-US-AndrewNeural"        # Edge TTS voice name (Breeze Male Natural Expressive)
-speed = 0.92                        # Natural relaxed human speaking pace (medium speed)
+voice = "auto"                     # Dynamic multilingual voice (ta-IN-Pallavi, en-IN-Prabhat, en-US-Ava, hi-IN-Madhur)
+speed = 0.95                       # Natural relaxed human speaking pace
 fallback_voice = ""                # pyttsx3 voice ID (auto-detect if empty)
 
 [voice.vad]

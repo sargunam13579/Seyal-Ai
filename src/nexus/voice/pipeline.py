@@ -79,13 +79,13 @@ class VoicePipeline:
         self,
         brain: NexusBrain,
         sample_rate: int = 16000,
-        stt_provider: str = "google_web",
+        stt_provider: str = "multilingual_gemini",
         tts_provider: str = "edge",
-        tts_voice: str = "en-US-JennyNeural",
+        tts_voice: str = "auto",
         tts_speed: float = 1.0,
         tts_fallback_voice: str = "",
-        language: str = "en-US",
-        silence_threshold_ms: int = 1500,
+        language: str = "auto",
+        silence_threshold_ms: int = 800,
         vad_threshold: float = 0.5,
         vad_min_speech_ms: int = 250,
         vad_energy_threshold: int = 300,
@@ -351,24 +351,26 @@ class VoicePipeline:
         """
         self._set_state(PipelineState.PROCESSING)
 
-        # Step 1: Speech-to-Text
+        # Step 1: Speech-to-Text with automatic language detection
         try:
-            text = await self._stt.transcribe(
+            trans_res = await self._stt.transcribe_with_language(
                 audio_segment,
                 self._sample_rate,
                 self._language,
             )
+            text = trans_res.text
+            detected_lang = trans_res.language
 
             if not text.strip():
                 log.debug("STT returned empty text, ignoring")
                 self._set_state(PipelineState.IDLE)
                 return
 
-            log.info("Voice input: '%s'", text)
+            log.info("Voice input: '%s' (detected language: %s)", text, detected_lang)
 
             await self._event_bus.emit(
                 "voice.stt.result",
-                {"text": text, "language": self._language},
+                {"text": text, "language": detected_lang},
                 source="voice.pipeline",
             )
 

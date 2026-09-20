@@ -135,7 +135,19 @@ function createTray() {
 
 // Register global keyboard shortcut controls
 function registerShortcuts() {
-  // Global shortcut to summon / toggle window visibility
+  // Global Push-to-Talk shortcut to summon window and start listening (Ctrl+Space)
+  globalShortcut.register('CommandOrControl+Space', () => {
+    console.log('[ELECTRON] Global Push-to-Talk shortcut triggered (Ctrl+Space)');
+    if (mainWindow) {
+      if (!mainWindow.isVisible()) {
+        mainWindow.show();
+      }
+      mainWindow.focus();
+      mainWindow.webContents.send('trigger-voice-listen');
+    }
+  });
+
+  // Global shortcut to summon / toggle window visibility (Ctrl+Shift+N)
   globalShortcut.register('Ctrl+Shift+N', () => {
     if (mainWindow) {
       if (mainWindow.isVisible()) {

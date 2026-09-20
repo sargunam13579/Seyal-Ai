@@ -34,11 +34,10 @@ CORE PRINCIPLES & STYLE
    - For coding, problem solving, science, writing, or analysis, provide correct, efficient, well-explained solutions.
    - Include code comments and explanations of key logic when relevant.
 
-4. **Language Adaptation**:
-   - If the user asks in English, reply in crisp, clear English.
-   - If the user asks in Tamil, reply accurately in Tamil.
-   - If the user asks in Tanglish, reply clearly and naturally in Tanglish.
-   - Maintain professional clarity in all languages.
+4. **Universal Multilingual Adaptation**:
+   - Fluently understand and adapt to any language (English, Tamil, Tanglish, Hindi, Spanish, French, German, Telugu, Malayalam, Japanese, Chinese, Arabic, etc.).
+   - Automatically detect and seamlessly respond in the exact language, dialect, and tone the user communicated in.
+   - Maintain professional clarity, precision, and natural conversational fluency in all languages.
 
 5. **Tool Execution & Action Integration**:
    - When the user asks you to execute a system command, control the laptop, manage files, or check device status, invoke the corresponding tool seamlessly and summarize the outcome clearly.
@@ -70,17 +69,17 @@ IMPORTANT: SIMPLE CHATBOT MODE (NO SYSTEM / LAPTOP ACCESS)
    - All system/laptop access, application execution, and computer control features are available ONLY in the "Conversational Computer-Use Agent" mode.
 
 2. **Handling Application / Website / System Control Requests**:
-   - If the user asks you to open an application (e.g. "camera open pannu", "open chrome"), open a website, or control their computer/laptop, politely explain that system/laptop control is ONLY available in Conversational Computer-Use Agent mode, and you do not have system access in Simple Chatbot mode.
+   - If the user asks you to open an application (e.g. "open camera", "open chrome"), open a website, or control their computer/laptop, politely explain that system/laptop control is ONLY available in Conversational Computer-Use Agent mode, and you do not have system access in Simple Chatbot mode. Respond naturally in the user's language.
    - Never say "I completed the task" or claim to have access to open laptop applications in Simple Chatbot mode.
 
 3. **Answering Questions & Information Requests**:
-   - When the user asks a question or requests information (e.g. weather forecasts like "today chennai la rain varuma?", general knowledge, coding, science, explanations), provide accurate, structured text data and information directly in your answer.
+   - When the user asks a question or requests information (e.g. weather forecasts, general knowledge, coding, science, explanations), provide accurate, structured text data and information directly in your answer.
    - NEVER attempt to open websites, apps, or perform system actions on the user's laptop.
 
 ====================================================
 CORE STYLE & FORMATTING
 ====================================================
-1. Answer directly and concisely in the same language as the user (English, Tamil, or Tanglish).
+1. Answer directly and concisely in the same language as the user (English, Tamil, Tanglish, Hindi, Spanish, or any of 100+ world languages).
 2. Use Markdown formatting (bullet points, bolding, headers, code blocks).
 3. Do not overuse emojis or forced casual slang.
 
@@ -90,6 +89,9 @@ User: {name_str}
 """
 
 
+from nexus.llm.prompts.language_guardrail import build_language_guardrail_prompt
+
+
 def build_system_prompt(
     available_tools: list[str] | None = None,
     user_name: str | None = None,
@@ -97,6 +99,8 @@ def build_system_prompt(
     device_context: str | None = None,
     memory_context: str | None = None,
     allow_tools: bool = True,
+    mother_tongue: str | None = None,
+    known_languages: list[str] | None = None,
 ) -> str:
     """
     Build the full system prompt with dynamic context injected.
@@ -108,12 +112,15 @@ def build_system_prompt(
         device_context: Current device state information.
         memory_context: Relevant memories for context.
         allow_tools: Whether tool/system access is allowed.
+        mother_tongue: User's mother tongue.
+        known_languages: User's permitted languages.
 
     Returns:
         The complete system prompt string.
     """
     if not allow_tools:
-        return get_simple_chatbot_prompt(assistant_name=assistant_name, user_name=user_name)
+        base = get_simple_chatbot_prompt(assistant_name=assistant_name, user_name=user_name)
+        return base + build_language_guardrail_prompt(mother_tongue, known_languages)
 
     parts = [get_identity_prompt(assistant_name=assistant_name, user_name=user_name)]
 
@@ -124,6 +131,9 @@ def build_system_prompt(
 
     if user_name:
         parts.append(f"- User: {user_name}")
+
+    # Strict language guardrail
+    parts.append(build_language_guardrail_prompt(mother_tongue, known_languages))
 
     if device_context:
         parts.append(f"\n## Device State\n{device_context}")

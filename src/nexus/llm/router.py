@@ -172,6 +172,39 @@ class ModelRouter:
 
         return response
 
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        tier: ModelTier = ModelTier.FAST,
+        tools: list[ToolSchema] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """
+        Generate a streaming LLM response, yielding text delta chunks as they arrive.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        provider, model = self._resolve_provider_and_model(tier)
+        cfg = self._settings.llm
+
+        log.info(
+            "Routing stream to %s (model=%s, tier=%s)",
+            provider.provider_name,
+            model,
+            tier.value,
+        )
+
+        async for chunk in provider.generate_stream(
+            messages=messages,
+            model=model,
+            tools=tools,
+            temperature=temperature or cfg.temperature,
+            max_tokens=max_tokens or cfg.max_tokens,
+        ):
+            yield chunk
+
     @property
     def available_providers(self) -> list[str]:
         """Return the names of all available providers."""

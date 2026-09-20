@@ -109,6 +109,21 @@ class ConversationUpdateRequest(BaseModel):
     summary: str
 
 
+class BatchDeleteRequest(BaseModel):
+    """Request to batch delete conversations."""
+
+    conversation_ids: list[str]
+
+
+class BatchDeleteResponse(BaseModel):
+    """Response for batch delete operations."""
+
+    message: str
+    deleted_count: int
+    deleted_ids: list[str]
+
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

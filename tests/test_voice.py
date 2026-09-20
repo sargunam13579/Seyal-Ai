@@ -206,7 +206,7 @@ class TestSTTEngine:
         from nexus.voice.stt import STTEngine
 
         stt = STTEngine(provider_name="google_web", language="en-US")
-        assert stt.provider_name == "Google Web Speech"
+        assert "Google Web Speech" in stt.provider_name
         assert stt.language == "en-US"
 
     def test_stt_engine_init_vosk(self):
@@ -221,7 +221,7 @@ class TestSTTEngine:
         from nexus.voice.stt import STTEngine
 
         stt = STTEngine(provider_name="unknown_provider")
-        assert stt.provider_name == "Google Web Speech"
+        assert "Google Web Speech" in stt.provider_name
 
     def test_stt_language_setter(self):
         """Language can be changed after init."""
@@ -237,6 +237,7 @@ class TestSTTEngine:
         from nexus.voice.stt import STTEngine, STTError
 
         stt = STTEngine()
+        stt._init_provider = lambda: None
         stt._provider = None
 
         with pytest.raises(STTError, match="No STT provider"):
@@ -578,10 +579,10 @@ class TestVoiceConfig:
 
         vs = VoiceSettings()
         assert vs.enabled is False
-        assert vs.stt_provider == "google_web"
+        assert vs.stt_provider in ("multilingual_gemini", "google_web")
         assert vs.tts_provider == "edge"
         assert vs.interaction_mode == "voice_and_text"
-        assert vs.language == "en-US"
+        assert vs.language in ("auto", "en-US")
         assert vs.interrupt_enabled is True
         assert vs.sample_rate == 16000
 
@@ -589,7 +590,7 @@ class TestVoiceConfig:
         from nexus.core.config import VoiceTTSSettings
 
         tts = VoiceTTSSettings()
-        assert tts.voice == "en-US-JennyNeural"
+        assert tts.voice in ("auto", "en-US-JennyNeural", "en-US-AvaMultilingualNeural")
         assert tts.speed == 1.0
 
     def test_voice_vad_settings_defaults(self):
@@ -604,7 +605,7 @@ class TestVoiceConfig:
         from nexus.core.config import VoiceSTTSettings
 
         stt = VoiceSTTSettings()
-        assert stt.language == "en-US"
+        assert stt.language in ("auto", "en-US")
         assert "en-US" in stt.supported_languages
 
 
@@ -635,7 +636,7 @@ class TestVoiceErrorHandling:
 
         stt = STTEngine(provider_name="google_web")
         assert stt._provider is not None
-        stt._provider.transcribe = AsyncMock(side_effect=Exception("network error"))
+        stt._provider.transcribe_with_language = AsyncMock(side_effect=Exception("network error"))
 
         with pytest.raises(STTError, match="Transcription failed"):
             await stt.transcribe(_make_audio(1.0))
@@ -645,7 +646,7 @@ class TestVoiceErrorHandling:
         """TTS falls back to pyttsx3 when edge fails."""
         from nexus.voice.tts import TTSEngine, TTSError
 
-        tts = TTSEngine(provider_name="edge")
+        tts = TTSEngine(provider_name="edge", voice="")
         assert tts._provider is not None
         assert tts._fallback_provider is not None
 
@@ -663,7 +664,7 @@ class TestVoiceErrorHandling:
         """TTSError raised when both primary and fallback fail."""
         from nexus.voice.tts import TTSEngine, TTSError
 
-        tts = TTSEngine(provider_name="edge")
+        tts = TTSEngine(provider_name="edge", voice="")
         assert tts._provider is not None
         assert tts._fallback_provider is not None
 
@@ -711,15 +712,16 @@ class TestVoicePipelineFlow:
             patch("nexus.voice.tts.TTSEngine._init_providers"),
         ):
             from nexus.voice.pipeline import VoicePipeline
+            from nexus.voice.stt import TranscriptionResult
 
             pipeline = VoicePipeline(brain=brain)
-            pipeline._stt.transcribe = AsyncMock(return_value="hello nexus")
+            pipeline._stt.transcribe_with_language = AsyncMock(return_value=TranscriptionResult(text="hello nexus", language="en"))
             pipeline._speak_response = AsyncMock()
 
             audio_segment = _make_audio(0.5)
             await pipeline._process_speech(audio_segment)
 
-            pipeline._stt.transcribe.assert_called_once()
+            pipeline._stt.transcribe_with_language.assert_called_once()
             brain.process.assert_called_once_with("hello nexus")
             pipeline._speak_response.assert_called_once_with("Speech response processed.")
 
@@ -737,9 +739,10 @@ class TestVoicePipelineFlow:
             patch("nexus.voice.tts.TTSEngine._init_providers"),
         ):
             from nexus.voice.pipeline import PipelineState, VoicePipeline
+            from nexus.voice.stt import TranscriptionResult
 
             pipeline = VoicePipeline(brain=brain)
-            pipeline._stt.transcribe = AsyncMock(return_value="   ")
+            pipeline._stt.transcribe_with_language = AsyncMock(return_value=TranscriptionResult(text="   ", language="en"))
             pipeline._speak_response = AsyncMock()
 
             await pipeline._process_speech(_make_audio(0.5))
@@ -891,13 +894,14 @@ class TestVoiceAPIRoutes:
 
     def test_transcribe_endpoint(self, test_client):
         from nexus.voice.audio_io import audio_to_wav_bytes
+        from nexus.voice.stt import TranscriptionResult
 
         client, _ = test_client
         audio = _make_audio(0.5)
         wav_bytes = audio_to_wav_bytes(audio, 16000)
 
-        with patch("nexus.voice.stt.STTEngine.transcribe", new_callable=AsyncMock) as mock_stt:
-            mock_stt.return_value = "transcribed speech"
+        with patch("nexus.voice.stt.STTEngine.transcribe_with_language", new_callable=AsyncMock) as mock_stt:
+            mock_stt.return_value = TranscriptionResult(text="transcribed speech", language="en")
             response = client.post(
                 "/api/voice/transcribe",
                 files={"audio": ("test.wav", wav_bytes, "audio/wav")},

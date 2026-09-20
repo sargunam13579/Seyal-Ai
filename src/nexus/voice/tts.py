@@ -54,6 +54,30 @@ def _split_sentences(text: str) -> list[str]:
     return sentences if sentences else [stripped]
 
 
+def resolve_multilingual_voice(text: str, requested_voice: str = "auto") -> str:
+    """
+    Resolve the neural voice to use. If text contains Tamil script, automatically route
+    to high-definition Tamil neural voices so Tamil characters are fully pronounced.
+    """
+    clean = text.strip()
+    vl = (requested_voice or "").lower().strip()
+
+    # Check if text contains Tamil Unicode script (U+0B80 to U+0BFF)
+    has_tamil = bool(re.search(r"[\u0B80-\u0BFF]", clean))
+    if has_tamil and not vl.startswith("ta-"):
+        is_male = any(m in vl for m in ("valluvar", "andrew", "brian", "prabhat", "male", "guy", "david", "midhun", "madhur"))
+        return "ta-IN-ValluvarNeural" if is_male else "ta-IN-PallaviNeural"
+
+    if vl and vl not in ("", "auto", "default"):
+        if vl in ("breeze", "en-us-avaneural"):
+            return "en-US-AvaMultilingualNeural"
+        return requested_voice
+
+    # Fallback default if not specified
+    return "en-US-AvaMultilingualNeural"
+
+
+
 class BaseTTSProvider(ABC):
     """Abstract base class for Text-to-Speech providers."""
 
@@ -108,8 +132,8 @@ class EdgeTTSProvider(BaseTTSProvider):
     """
     High-quality TTS using Microsoft Edge's free speech API.
 
-    Provides natural-sounding voices in many languages.
-    Requires internet connectivity.
+    Provides natural-sounding voices in many languages with automatic
+    multilingual dialect matching.
     """
 
     @property
@@ -119,7 +143,7 @@ class EdgeTTSProvider(BaseTTSProvider):
     async def synthesize(
         self,
         text: str,
-        voice: str = "en-IN-PrabhatNeural",
+        voice: str = "auto",
         speed: float = 1.0,
     ) -> bytes:
         try:
@@ -129,51 +153,61 @@ class EdgeTTSProvider(BaseTTSProvider):
                 "edge-tts library not installed. Install with: pip install nexus-agent[voice]"
             ) from err
 
-        # Normalize voice identifier
-        resolved_voice = voice or "en-US-AvaNeural"
-        if resolved_voice.lower() in ("breeze", "default"):
-            resolved_voice = "en-US-AvaNeural"
+        # Dynamically resolve voice according to language/script of text
+        resolved_voice = resolve_multilingual_voice(text, voice)
+        vl = resolved_voice.lower()
+        if vl in ("breeze", "default", "en-us-avaneural"):
+            resolved_voice = "en-US-AvaMultilingualNeural"
+        elif vl in ("andrew", "en-us-andrewneural"):
+            resolved_voice = "en-US-AndrewMultilingualNeural"
+        elif vl in ("emma", "en-us-emmaneural"):
+            resolved_voice = "en-US-EmmaMultilingualNeural"
+        elif vl in ("brian", "en-us-brianneural"):
+            resolved_voice = "en-US-BrianMultilingualNeural"
 
-        # Detect Tamil Unicode characters (U+0B80 to U+0BFF) and route to appropriate Tamil Neural voice
-        has_tamil = any("\u0b80" <= c <= "\u0bff" for c in text)
-        if has_tamil:
-            if resolved_voice.startswith("ta-"):
-                # Use the chosen Tamil voice directly (e.g. ta-IN-PallaviNeural or ta-IN-ValluvarNeural)
-                pass
-            elif any(f_name in resolved_voice.lower() for f_name in ("ava", "jenny", "emma", "neerja", "pallavi", "female")):
-                resolved_voice = "ta-IN-PallaviNeural"
-            else:
-                resolved_voice = "ta-IN-ValluvarNeural"
+        # Natural conversational pacing: convert line/paragraph breaks into natural human breath pauses
+        paced_text = re.sub(r"\n{2,}", ". ", text.strip())
+        paced_text = re.sub(r"\n", ", ", paced_text)
+        paced_text = re.sub(r"\s+", " ", paced_text).strip()
 
-        # Convert speed to edge-tts format: e.g. -8% for relaxed, natural human tempo
-        speed_pct = int((speed - 1.0) * 100)
+        # Convert speed to edge-tts format: e.g. 0.88 -> -12% for relaxed, natural human cadence
+        speed_pct = round((speed - 1.0) * 100)
         speed_str = f"+{speed_pct}%" if speed_pct >= 0 else f"{speed_pct}%"
 
-        try:
-            communicate = edge_tts.Communicate(text, resolved_voice, rate=speed_str)
+        for attempt in range(2):
+            try:
+                communicate = edge_tts.Communicate(paced_text or text, resolved_voice, rate=speed_str)
 
-            audio_chunks: list[bytes] = []
-            async for chunk in communicate.stream():
-                if isinstance(chunk, dict) and chunk.get("type") == "audio":
-                    chunk_data = chunk.get("data")
-                    if isinstance(chunk_data, (bytes, bytearray)):
-                        audio_chunks.append(chunk_data if isinstance(chunk_data, bytes) else bytes(chunk_data))
+                audio_chunks: list[bytes] = []
+                async for chunk in communicate.stream():
+                    if isinstance(chunk, dict) and chunk.get("type") == "audio":
+                        chunk_data = chunk.get("data")
+                        if isinstance(chunk_data, (bytes, bytearray)):
+                            audio_chunks.append(chunk_data if isinstance(chunk_data, bytes) else bytes(chunk_data))
 
-            if not audio_chunks:
-                raise TTSError("Edge TTS returned no audio data")
+                if not audio_chunks:
+                    raise TTSError("Edge TTS returned no audio data")
 
-            audio_bytes = b"".join(audio_chunks)
-            log.debug(
-                "Edge TTS synthesized %d bytes for: '%s...'",
-                len(audio_bytes),
-                text[:50],
-            )
-            return audio_bytes
+                audio_bytes = b"".join(audio_chunks)
+                log.debug(
+                    "Edge TTS synthesized %d bytes for: '%s...'",
+                    len(audio_bytes),
+                    text[:50],
+                )
+                return audio_bytes
 
-        except TTSError:
-            raise
-        except Exception as e:
-            raise TTSError(f"Edge TTS synthesis failed: {e}") from e
+            except TTSError:
+                if attempt == 0:
+                    await asyncio.sleep(0.3)
+                    continue
+                raise
+            except Exception as e:
+                if attempt == 0:
+                    await asyncio.sleep(0.3)
+                    continue
+                raise TTSError(f"Edge TTS synthesis failed: {e}") from e
+
+        raise TTSError("Edge TTS synthesis failed after retry")
 
     async def check_availability(self) -> bool:
         import importlib.util
@@ -316,7 +350,7 @@ class TTSEngine:
     def __init__(
         self,
         provider_name: str = "edge",
-        voice: str = "en-US-AndrewNeural",
+        voice: str = "auto",
         speed: float = 1.0,
         fallback_voice: str = "",
     ) -> None:
@@ -372,6 +406,10 @@ class TTSEngine:
                 raise TTSError("No TTS provider configured")
             return await self._provider.synthesize(text, self._voice, self._speed)
         except TTSError as e:
+            # Do NOT drop to robotic pyttsx3 (Microsoft David) if a Neural voice was specified
+            if self._provider_name == "edge" and self._voice:
+                log.warning("Edge TTS synthesis failed for voice '%s': %s", self._voice, e)
+                raise
             if self._fallback_provider is not None:
                 log.warning("Primary TTS failed (%s), trying fallback", e)
                 voice = self._fallback_voice or ""

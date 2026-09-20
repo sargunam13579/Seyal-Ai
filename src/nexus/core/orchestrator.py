@@ -130,10 +130,10 @@ class Orchestrator:
             # If the LLM returned a final text response (no tool calls), we're done
             if not response.has_tool_calls:
                 default_fallback = (
-                    "Enakku Simple Chatbot mode-il laptop applications/websites open seiya access illai. "
-                    "System/laptop access Conversational Computer-Use Agent-il (Headphone icon) mattum thaan irukku!"
+                    "I am currently in Simple Chatbot mode and do not have access to open applications, websites, or control your laptop. "
+                    "Please switch to Conversational Computer-Use Agent mode for system and laptop control."
                     if not allow_tools
-                    else "I completed the task."
+                    else "I have completed the task."
                 )
                 final_response = response.content or default_fallback
                 self._context.add_assistant_message(final_response)
@@ -183,6 +183,40 @@ class Orchestrator:
         final = "I've been working on this task but reached my step limit. Here's what I've done so far."
         self._context.add_assistant_message(final)
         return final
+
+    async def process_stream(
+        self,
+        user_input: str,
+        tier: ModelTier = ModelTier.FAST,
+        allow_tools: bool = False,
+    ):
+        """
+        Process user input and stream text chunks in real-time.
+        """
+        self.last_tool_calls = []
+        self._context.add_user_message(user_input)
+
+        if not allow_tools:
+            from nexus.llm.prompts.system import get_simple_chatbot_prompt
+            from nexus.llm.providers.base import LLMMessage
+            chatbot_prompt = get_simple_chatbot_prompt()
+            messages = [LLMMessage(role="system", content=chatbot_prompt)] + [
+                m for m in self._context.get_messages() if m.role != "system"
+            ]
+        else:
+            messages = self._context.get_messages()
+
+        full_chunks: list[str] = []
+        async for chunk in self._router.generate_stream(
+            messages=messages,
+            tier=tier,
+        ):
+            full_chunks.append(chunk)
+            yield chunk
+
+        final_response = "".join(full_chunks)
+        if final_response:
+            self._context.add_assistant_message(final_response)
 
     def reset(self) -> None:
         """Reset the conversation context."""

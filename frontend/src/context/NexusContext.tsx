@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import { useAuth } from './AuthContext';
+import { connectionManager, type ConnectionState, type ReadinessInfo } from '../services/ConnectionManager';
 import type {
   HealthResponse,
   IdentityResponse,
@@ -9,6 +10,7 @@ import type {
   ActivityEvent,
   MessageItem,
 } from '../types';
+import { loadSavedRadialOrder, saveRadialOrder } from '../config/radialActionsConfig';
 
 export type NavView =
   | 'dashboard'
@@ -42,11 +44,13 @@ interface NexusContextType {
   setActiveView: (view: NavView) => void;
   identity: IdentityResponse | null;
   health: HealthResponse | null;
+  readiness: ReadinessInfo | null;
   laptopStatus: LaptopStatusResponse | null;
   devices: DeviceNode[];
   activities: ActivityEvent[];
   pendingConfirmationPrompt: string | null;
   isBackendConnected: boolean;
+  connectionState: ConnectionState;
   isLoading: boolean;
   isComputerUseActive: boolean;
   setIsComputerUseActive: (active: boolean) => void;
@@ -69,6 +73,29 @@ interface NexusContextType {
   addActivity: (event: Omit<ActivityEvent, 'id' | 'timestamp'>) => void;
   triggerEmergencyStop: () => void;
   resetChatContext: () => Promise<void>;
+  conversationsVersion: number;
+  refreshConversations: () => void;
+  isSidebarCollapsed: boolean;
+  setIsSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
+  isSimpleSidebarCollapsed: boolean;
+  setIsSimpleSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
+  isConvoSidebarCollapsed: boolean;
+  setIsConvoSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
+  isHeroLogoOpen: boolean;
+  setIsHeroLogoOpen: (open: boolean) => void;
+  isHeroLogoClosing: boolean;
+  heroLogoTrigger: number;
+  openHeroLogo: () => void;
+  closeHeroLogo: () => void;
+  radialButtonOrder: string[];
+  setRadialButtonOrder: (order: string[]) => void;
+  isTextInputPopupOpen: boolean;
+  setIsTextInputPopupOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  activeSettingsTab: string;
+  setActiveSettingsTab: (tab: string) => void;
+  openSettingsTab: (tab: string) => void;
+  userProfileAvatar: string | null;
+  setUserProfileAvatar: (avatar: string | null) => void;
 }
 
 const NexusContext = createContext<NexusContextType | undefined>(undefined);
@@ -76,7 +103,89 @@ const NexusContext = createContext<NexusContextType | undefined>(undefined);
 export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<NavView>('assistant');
-  const [isComputerUseActive, setIsComputerUseActive] = useState<boolean>(false);
+  const [activeSettingsTab, setActiveSettingsTab] = useState<string>('general');
+  const [isComputerUseActive, setIsComputerUseActive] = useState<boolean>(true);
+  const [conversationsVersion, setConversationsVersion] = useState<number>(0);
+
+  const openSettingsTab = useCallback((tab: string) => {
+    setActiveSettingsTab(tab);
+    setActiveView('settings');
+  }, []);
+
+  // Frequent Task Shortcuts (Action Popup 8-buttons custom ordering)
+  const [radialButtonOrder, setRadialButtonOrderState] = useState<string[]>(() => loadSavedRadialOrder());
+
+  const setRadialButtonOrder = useCallback((order: string[]) => {
+    setRadialButtonOrderState(order);
+    saveRadialOrder(order);
+  }, []);
+
+  // Independent sidebar collapse states: both default to OPEN (false)
+  const [isSimpleSidebarCollapsed, setIsSimpleSidebarCollapsed] = useState<boolean>(false);
+  const [isConvoSidebarCollapsed, setIsConvoSidebarCollapsed] = useState<boolean>(false);
+
+  // Hero Logo Orb state: waits 1 second after app launch before opening
+  const [isHeroLogoOpen, setIsHeroLogoOpen] = useState<boolean>(false);
+  const [isHeroLogoClosing, setIsHeroLogoClosing] = useState<boolean>(false);
+  const [heroLogoTrigger, setHeroLogoTrigger] = useState<number>(0);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Floating text input bar popup state (defaults to open in original view)
+  const [isTextInputPopupOpen, setIsTextInputPopupOpen] = useState<boolean>(true);
+
+  const openHeroLogo = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setIsHeroLogoClosing(false);
+    setIsHeroLogoOpen(true);
+    setHeroLogoTrigger((prev) => prev + 1);
+  }, []);
+
+  const closeHeroLogo = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+    }
+    setIsHeroLogoClosing(true);
+    closeTimerRef.current = setTimeout(() => {
+      setIsHeroLogoOpen(false);
+      setIsHeroLogoClosing(false);
+      closeTimerRef.current = null;
+    }, 1100);
+  }, []);
+
+  // Launch popup with flight animation 1 second after app opens
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsHeroLogoOpen(true);
+      setHeroLogoTrigger((prev) => prev + 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+
+
+  // Clear any legacy persisted collapsed state so both always default to open
+  useEffect(() => {
+    try {
+      localStorage.removeItem('nexus_sidebar_collapsed');
+      localStorage.removeItem('nexus_simple_sidebar_collapsed');
+      localStorage.removeItem('nexus_convo_sidebar_collapsed');
+    } catch { }
+  }, []);
+
+  const handleSetIsSimpleSidebarCollapsed = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+    setIsSimpleSidebarCollapsed((prev) => (typeof val === 'function' ? val(prev) : val));
+  }, []);
+
+  const handleSetIsConvoSidebarCollapsed = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
+    setIsConvoSidebarCollapsed((prev) => (typeof val === 'function' ? val(prev) : val));
+  }, []);
+
+  const refreshConversations = useCallback(() => {
+    setConversationsVersion((v) => v + 1);
+  }, []);
 
   // Initialise identity with the user name from the Supabase JWT metadata so the
   // greeting and avatar render instantly (before the /api/identity round-trip completes).
@@ -94,8 +203,9 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [devices, setDevices] = useState<DeviceNode[]>([]);
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [pendingConfirmationPrompt, setPendingConfirmationPrompt] = useState<string | null>(null);
-  const [isBackendConnected, setIsBackendConnected] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [connectionState, setConnectionState] = useState<ConnectionState>(connectionManager.getState());
+  const [readiness, setReadiness] = useState<ReadinessInfo | null>(connectionManager.getReadiness());
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Separate conversation states for Simple Chatbot vs Conversational Computer-Use Agent
   const [simpleConversationId, setSimpleConversationId] = useState<string | null>(null);
@@ -122,6 +232,31 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('nexus_user_avatar') || null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    const handleAvatarUpdate = () => {
+      try {
+        const stored = localStorage.getItem('nexus_user_avatar') || null;
+        setUserProfileAvatar(stored);
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('nexus_avatar_updated', handleAvatarUpdate);
+    window.addEventListener('storage', handleAvatarUpdate);
+    return () => {
+      window.removeEventListener('nexus_avatar_updated', handleAvatarUpdate);
+      window.removeEventListener('storage', handleAvatarUpdate);
+    };
+  }, []);
+
   const userHasInteractedRef = useRef<boolean>(false);
 
   const addActivity = useCallback((event: Omit<ActivityEvent, 'id' | 'timestamp'>) => {
@@ -133,22 +268,27 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActivities((prev) => [newEvent, ...prev.slice(0, 49)]);
   }, []);
 
+  const isBackendConnected = connectionState === 'CONNECTED' || connectionState === 'DEGRADED';
+
+  useEffect(() => {
+    connectionManager.start();
+    const unsubscribe = connectionManager.subscribe((state, healthData, readyData) => {
+      setConnectionState(state);
+      if (healthData) setHealth(healthData);
+      setReadiness(readyData);
+      setIsLoading(false);
+    });
+    return () => {
+      unsubscribe();
+      connectionManager.stop();
+    };
+  }, []);
+
+  // Decoupled App State Sync: Fetches identity, laptop telemetry, and devices without impacting liveness
   const refreshState = useCallback(async () => {
     try {
-      const [healthData, identityData] = await Promise.allSettled([
-        api.getHealth(),
-        api.getIdentity(),
-      ]);
-
-      if (healthData.status === 'fulfilled') {
-        setHealth(healthData.value);
-        setIsBackendConnected(true);
-      } else {
-        setIsBackendConnected(false);
-      }
-
-      if (identityData.status === 'fulfilled') {
-        const idData = identityData.value;
+      const idData = await api.getIdentity().catch(() => null);
+      if (idData) {
         setIdentity(idData);
 
         if (idData.has_pending_confirmation && !pendingConfirmationPrompt) {
@@ -177,19 +317,16 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Devices list optional
       }
     } catch (err) {
-      console.error('Error refreshing state:', err);
-      setIsBackendConnected(false);
-    } finally {
-      setIsLoading(false);
+      console.warn('Error refreshing state:', err);
     }
   }, [pendingConfirmationPrompt]);
 
   useEffect(() => {
-    refreshState();
-    // Poll every 2s while disconnected so we latch on immediately when backend is ready; 10s once connected
-    const pollIntervalMs = isBackendConnected ? 10000 : 2000;
-    const interval = setInterval(refreshState, pollIntervalMs);
-    return () => clearInterval(interval);
+    if (isBackendConnected) {
+      refreshState();
+      const interval = setInterval(refreshState, 15000);
+      return () => clearInterval(interval);
+    }
   }, [refreshState, isBackendConnected]);
 
   const requestNameChange = async (targetName: string): Promise<string> => {
@@ -292,6 +429,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         activities,
         pendingConfirmationPrompt,
         isBackendConnected,
+        connectionState,
+        readiness,
         isLoading,
         activeConversationId,
         setActiveConversationId,
@@ -312,6 +451,29 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addActivity,
         triggerEmergencyStop,
         resetChatContext,
+        conversationsVersion,
+        refreshConversations,
+        isSidebarCollapsed: isComputerUseActive ? isConvoSidebarCollapsed : isSimpleSidebarCollapsed,
+        setIsSidebarCollapsed: isComputerUseActive ? handleSetIsConvoSidebarCollapsed : handleSetIsSimpleSidebarCollapsed,
+        isSimpleSidebarCollapsed,
+        setIsSimpleSidebarCollapsed: handleSetIsSimpleSidebarCollapsed,
+        isConvoSidebarCollapsed,
+        setIsConvoSidebarCollapsed: handleSetIsConvoSidebarCollapsed,
+        isHeroLogoOpen,
+        setIsHeroLogoOpen,
+        isHeroLogoClosing,
+        heroLogoTrigger,
+        openHeroLogo,
+        closeHeroLogo,
+        radialButtonOrder,
+        setRadialButtonOrder,
+        isTextInputPopupOpen,
+        setIsTextInputPopupOpen,
+        activeSettingsTab,
+        setActiveSettingsTab,
+        openSettingsTab,
+        userProfileAvatar,
+        setUserProfileAvatar,
       }}
     >
       {children}

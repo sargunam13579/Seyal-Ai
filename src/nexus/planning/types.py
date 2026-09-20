@@ -31,11 +31,13 @@ class PlanStatus(StrEnum):
     """Lifecycle status of a multi-step plan."""
 
     PLANNING = "planning"
+    PENDING = "pending"
     IN_PROGRESS = "in_progress"
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
 
 
 class RiskLevel(StrEnum):

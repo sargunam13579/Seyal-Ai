@@ -191,6 +191,7 @@ body::before {
 
 aside.glass-panel {
   position: relative;
+  z-index: 40;
 
   background:
     linear-gradient(180deg,
@@ -894,6 +895,91 @@ aside button:hover {
   color: #021014;
   background: var(--cyan);
 }
+
+
+/* ============================================================
+   HERO AGENT LOGO ANIMATION (Top-Right to Center Flight)
+   ============================================================ */
+@keyframes heroLogoFlyIn {
+  0% {
+    transform: translate(36vw, -36vh) scale(0.18);
+    opacity: 0.15;
+  }
+  65% {
+    transform: translate(-3px, 4px) scale(1.04);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes heroLogoFlyOut {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  30% {
+    transform: translate(-3px, 4px) scale(1.03);
+    opacity: 0.95;
+  }
+  100% {
+    transform: translate(36vw, -36vh) scale(0.18);
+    opacity: 0;
+  }
+}
+
+.animate-hero-fly-in {
+  animation: heroLogoFlyIn 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-hero-fly-out {
+  animation: heroLogoFlyOut 1.1s cubic-bezier(0.3, 0, 0.4, 1) forwards;
+}
+
+/* ============================================================
+   ACTIVE CHAT TITLE SMOOTH MARQUEE (TICKER) ANIMATION
+   ============================================================ */
+@keyframes marqueeScroll {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee-scroll {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marqueeScroll 10s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* WhatsApp-Style Typing Indicator 3-Dot Bounce */
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+.animate-typing-dot {
+  animation: typingBounce 1.3s infinite ease-in-out both;
+}
+
+/* ============================================================
+   RADIAL MENU - ANIMATIONS DRIVEN BY UNIFIED LINKED CHAIN ENGINE
+   ============================================================ */
 
 
 /* ============================================================

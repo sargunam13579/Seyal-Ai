@@ -32,6 +32,11 @@ class PermissionScope(StrEnum):
     NOTIFICATIONS = "notifications"
     ACCESSIBILITY = "accessibility"
     DEVICE_CONTROL = "device_control"
+    MOUSE_CONTROL = "mouse_control"
+    KEYBOARD_CONTROL = "keyboard_control"
+    APP_CONTROL = "app_control"
+    FILE_OPERATIONS = "file_operations"
+    LOCATION = "location"
 
 
 class PermissionAction:
@@ -49,8 +54,11 @@ class ScopeStatus:
     scope: str
     granted: bool
     description: str
+    mode: str = "allow"  # "allow" (Always Allow), "ask" (Ask Before Use), "block" (Blocked)
     granted_at: float | None = None
     updated_at: float = field(default_factory=time.time)
+    last_accessed_at: float | None = None
+    last_accessed_by: str | None = None
     metadata: dict[str, str] = field(default_factory=dict)
 
 
@@ -63,6 +71,11 @@ _DEFAULT_SCOPE_DESCRIPTIONS: dict[PermissionScope, str] = {
     PermissionScope.NOTIFICATIONS: "Display system notifications and alert banners to the user.",
     PermissionScope.ACCESSIBILITY: "Automate keyboard/mouse inputs, inspect UI trees, and manage hands-free mode.",
     PermissionScope.DEVICE_CONTROL: "Control connected Android phones, launch applications, and send cross-device files.",
+    PermissionScope.MOUSE_CONTROL: "Autonomous mouse control: Move cursor, click, double click, right click, and drag.",
+    PermissionScope.KEYBOARD_CONTROL: "Autonomous keyboard control: Type text, execute key shortcuts, and paste clipboard.",
+    PermissionScope.APP_CONTROL: "Autonomous application control: Launch desktop programs, switch active windows, and close apps.",
+    PermissionScope.FILE_OPERATIONS: "Autonomous file operations: Search directories, inspect folder contents, and manage files.",
+    PermissionScope.LOCATION: "Access device approximate location, timezone, and geolocation for regional context.",
 }
 
 # Tool to Scope mapping
@@ -106,13 +119,14 @@ class PermissionScopeManager:
         self._load()
 
     def _initialize_scopes(self) -> None:
-        """Initialize all default scopes with granted status by default."""
+        """Initialize all default scopes with OFF (block) status by default before user explicitly allows."""
         for scope in PermissionScope:
             self._scopes[scope.value] = ScopeStatus(
                 scope=scope.value,
-                granted=True,  # Default to granted on install
-                description=_DEFAULT_SCOPE_DESCRIPTIONS[scope],
-                granted_at=time.time(),
+                granted=False,  # Default to OFF until user explicitly allows
+                mode="block",
+                description=_DEFAULT_SCOPE_DESCRIPTIONS.get(scope, f"Capability scope: {scope.value}"),
+                granted_at=None,
             )
 
     def _load(self) -> None:
@@ -125,8 +139,35 @@ class PermissionScopeManager:
                 return
             data = json.loads(raw)
             for item in data.get("scopes", []):
-                s = ScopeStatus(**item)
+                scope_name = item.get("scope")
+                if not scope_name:
+                    continue
+                granted = item.get("granted", False)
+                mode = item.get("mode", "allow" if granted else "block")
+                s = ScopeStatus(
+                    scope=scope_name,
+                    granted=granted,
+                    description=item.get("description", ""),
+                    mode=mode,
+                    granted_at=item.get("granted_at"),
+                    updated_at=item.get("updated_at", time.time()),
+                    last_accessed_at=item.get("last_accessed_at"),
+                    last_accessed_by=item.get("last_accessed_by"),
+                    metadata=item.get("metadata", {}),
+                )
                 self._scopes[s.scope] = s
+
+            # Ensure all PermissionScope values (e.g. LOCATION) are present
+            for scope in PermissionScope:
+                if scope.value not in self._scopes:
+                    desc = _DEFAULT_SCOPE_DESCRIPTIONS.get(scope, f"Capability scope: {scope.value}")
+                    self._scopes[scope.value] = ScopeStatus(
+                        scope=scope.value,
+                        granted=False,
+                        mode="block",
+                        description=desc,
+                        granted_at=None,
+                    )
         except Exception as e:
             log.warning("Could not load permissions from disk: %s", e)
 
@@ -145,53 +186,71 @@ class PermissionScopeManager:
 
     def is_scope_granted(self, scope: PermissionScope | str) -> bool:
         """Check if a capability scope is currently granted."""
-        scope_str = scope.value if isinstance(scope, PermissionScope) else str(scope)
+        scope_str = scope.value if isinstance(scope, PermissionScope) else scope
         status = self._scopes.get(scope_str)
         if status is None:
-            # Unknown scope default to False for safety
             return False
         return status.granted
+
+    def get_scope_status(self, scope: PermissionScope | str) -> ScopeStatus | None:
+        """Get the ScopeStatus object for a capability scope."""
+        scope_str = scope.value if isinstance(scope, PermissionScope) else scope
+        return self._scopes.get(scope_str)
 
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check if a tool's required capability scope is granted."""
         scope = _TOOL_SCOPE_MAP.get(tool_name)
         if scope is None:
-            # Tool has no explicit capability constraint
             return True
         return self.is_scope_granted(scope)
 
-    def grant_scope(self, scope: PermissionScope | str) -> None:
-        """Grant a capability scope."""
-        scope_str = scope.value if isinstance(scope, PermissionScope) else str(scope)
+    def set_mode(self, scope: PermissionScope | str, mode: str) -> None:
+        """Set 3-way mode for a scope: 'allow', 'ask', 'block'."""
+        scope_str = scope.value if isinstance(scope, PermissionScope) else scope
+        if mode not in ("allow", "ask", "block"):
+            mode = "allow"
+
+        is_granted = (mode != "block")
         if scope_str in self._scopes:
-            self._scopes[scope_str].granted = True
-            self._scopes[scope_str].granted_at = time.time()
+            self._scopes[scope_str].mode = mode
+            self._scopes[scope_str].granted = is_granted
             self._scopes[scope_str].updated_at = time.time()
+            if is_granted and not self._scopes[scope_str].granted_at:
+                self._scopes[scope_str].granted_at = time.time()
         else:
+            try:
+                scope_enum = PermissionScope(scope_str)
+                desc = _DEFAULT_SCOPE_DESCRIPTIONS.get(scope_enum, f"Capability scope: {scope_str}")
+            except (ValueError, KeyError):
+                desc = f"Capability scope: {scope_str}"
+
             self._scopes[scope_str] = ScopeStatus(
                 scope=scope_str,
-                granted=True,
-                description=f"Custom permission scope: {scope_str}",
-                granted_at=time.time(),
+                granted=is_granted,
+                mode=mode,
+                description=desc,
+                granted_at=time.time() if is_granted else None,
             )
         self._save()
-        log.info("Granted permission scope: %s", scope_str)
+        log.info("Set permission scope '%s' mode to '%s'", scope_str, mode)
+
+    def record_access(self, scope: PermissionScope | str, accessor: str = "System Action") -> None:
+        """Record when a scope capability was accessed by a tool or component."""
+        scope_str = scope.value if isinstance(scope, PermissionScope) else scope
+        if scope_str in self._scopes:
+            self._scopes[scope_str].last_accessed_at = time.time()
+            self._scopes[scope_str].last_accessed_by = accessor
+            self._save()
+
+    def grant_scope(self, scope: PermissionScope | str) -> None:
+        """Grant a capability scope."""
+        self.set_mode(scope, "allow")
+        log.info("Granted permission scope: %s", scope)
 
     def revoke_scope(self, scope: PermissionScope | str) -> None:
         """Revoke a capability scope."""
-        scope_str = scope.value if isinstance(scope, PermissionScope) else str(scope)
-        if scope_str in self._scopes:
-            self._scopes[scope_str].granted = False
-            self._scopes[scope_str].updated_at = time.time()
-        else:
-            self._scopes[scope_str] = ScopeStatus(
-                scope=scope_str,
-                granted=False,
-                description=f"Custom permission scope: {scope_str}",
-                granted_at=None,
-            )
-        self._save()
-        log.warning("Revoked permission scope: %s", scope_str)
+        self.set_mode(scope, "block")
+        log.warning("Revoked permission scope: %s", scope)
 
     def list_scopes(self) -> dict[str, ScopeStatus]:
         """List all permission scopes and their current status."""

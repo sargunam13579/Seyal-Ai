@@ -8,7 +8,9 @@ cancellation tokens, and emergency stop systems.
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
+
 
 from nexus.core.confirmation import ConfirmationManager
 from nexus.llm.router import ModelRouter
@@ -147,14 +149,31 @@ class TaskManager:
             self._active_plan_id = None
         return result
 
+    def cleanup_expired_tasks(self, max_age_days: int = 30) -> int:
+        """Purge tasks older than max_age_days (30 days default)."""
+        cutoff = time.time() - (max_age_days * 86400)
+        expired_ids = [
+            pid
+            for pid, p in self._plans.items()
+            if getattr(p, "created_at", None) and p.created_at < cutoff
+        ]
+        for pid in expired_ids:
+            del self._plans[pid]
+            log.info("Task manager purged expired task %s (max_age_days=%s)", pid, max_age_days)
+        return len(expired_ids)
+
+
     def get_task(self, plan_id: str) -> Plan | None:
         """Retrieve a plan by its ID."""
+        self.cleanup_expired_tasks(30)
         return self._plans.get(plan_id)
 
     def get_task_progress(self, plan_id: str) -> TaskProgress | None:
         """Retrieve the progress metrics for a plan."""
         return self.progress.get_progress(plan_id)
 
-    def list_tasks(self) -> list[Plan]:
-        """List all tracked plans."""
+    def list_tasks(self, max_age_days: int = 30) -> list[Plan]:
+        """List all tracked plans, automatically deleting any tasks older than 30 days."""
+        self.cleanup_expired_tasks(max_age_days)
         return list(self._plans.values())
+

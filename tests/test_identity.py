@@ -179,7 +179,7 @@ class TestConfirmationManager:
     @pytest.mark.asyncio
     async def test_confirm_flow(self):
         cm = ConfirmationManager()
-        callback_called = False
+        callback_called: bool = False
 
         def on_confirm(payload):
             nonlocal callback_called
@@ -195,14 +195,14 @@ class TestConfirmationManager:
 
         status, msg = await cm.handle_response("yes")
         assert status == ConfirmationStatus.CONFIRMED
-        assert callback_called is True
+        assert callback_called
         assert msg == "Changed name to Aria!"
         assert not cm.has_pending
 
     @pytest.mark.asyncio
     async def test_reject_flow(self):
         cm = ConfirmationManager()
-        callback_called = False
+        callback_called: bool = False
 
         def on_reject(payload):
             nonlocal callback_called
@@ -217,7 +217,7 @@ class TestConfirmationManager:
 
         status, msg = await cm.handle_response("no")
         assert status == ConfirmationStatus.REJECTED
-        assert callback_called is True
+        assert callback_called
         assert msg == "Name change aborted."
         assert not cm.has_pending
 
@@ -359,11 +359,11 @@ class TestNexusBrainIdentityFlow:
         brain = NexusBrain(settings=settings, identity=id_mgr)
         await brain.initialize()
 
-        assert brain.name == "NEXUS"
+        assert brain.name == "Seyal AI"
 
         # 1. User asks to change name
-        resp1 = await brain.process("Nexus, from now on your name is Aria")
-        assert "Do you want me to change my name from NEXUS to Aria?" in resp1
+        resp1 = await brain.process("Change your name to Aria")
+        assert "Do you want me to change my name from Seyal AI to Aria?" in resp1
         assert brain.confirmation.has_pending
 
         # 2. User confirms
@@ -391,7 +391,7 @@ class TestNexusBrainIdentityFlow:
         # 2. User rejects
         resp2 = await brain.process("No")
         assert "cancelled" in resp2.lower()
-        assert brain.name == "NEXUS"  # Name should remain unchanged
+        assert brain.name == "Seyal AI"  # Name should remain unchanged
         assert not brain.confirmation.has_pending
 
 
@@ -414,8 +414,8 @@ class TestIdentityAPIRoutes:
             resp = client.get("/api/identity")
             assert resp.status_code == 200
             data = resp.json()
-            assert data["assistant_name"] == "NEXUS"
-            assert data["wake_word"] == "NEXUS"
+            assert data["assistant_name"] == "Seyal AI"
+            assert data["wake_word"] == "Seyal AI"
             assert data["require_wake_word"] is False
 
     def test_change_name_and_confirm_endpoint(self, tmp_path: Path):
@@ -432,7 +432,7 @@ class TestIdentityAPIRoutes:
             assert init_resp.status_code == 200
             init_data = init_resp.json()
             assert init_data["target_name"] == "Aria"
-            prompt_str = "Do you want me to change my name from NEXUS to Aria?"
+            prompt_str = "Do you want me to change my name from Seyal AI to Aria?"
             assert prompt_str in init_data["confirmation_prompt"]
 
             # Step 2: Confirm action
@@ -477,11 +477,11 @@ class TestIdentityAPIRoutes:
 
         with TestClient(app) as client:
             app.state.brain = mock_brain
-            resp = client.post("/api/wake-word/detect", json={"text": "Hey Nexus, open Chrome"})
+            resp = client.post("/api/wake-word/detect", json={"text": "Hey Seyal AI, open Chrome"})
             assert resp.status_code == 200
             data = resp.json()
             assert data["matched"] is True
-            assert data["wake_word"] == "NEXUS"
+            assert data["wake_word"] == "Seyal AI"
             assert data["prefix"] == "hey"
             assert data["command"] == "open Chrome"
 

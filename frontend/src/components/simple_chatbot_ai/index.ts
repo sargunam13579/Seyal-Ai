@@ -1,1 +1,0 @@
-export { SimpleChatbotView } from './SimpleChatbotView';

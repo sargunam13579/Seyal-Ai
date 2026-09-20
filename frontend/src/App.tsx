@@ -5,57 +5,45 @@ import { VoiceProvider, useVoice } from './context/VoiceContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { ConfirmationModal } from './components/common/ConfirmationModal';
-import { DashboardView } from './components/views/DashboardView';
-import { SimpleChatbotView } from './components/simple_chatbot_ai';
 import { ConvoComputerUseAgentView } from './components/convo_computer_use_agent';
 import { SystemControlView } from './components/views/SystemControlView';
 import { ApplicationsView } from './components/views/ApplicationsView';
+import { HeroAgentLogoOrb } from './components/convo_computer_use_agent/HeroAgentLogoOrb';
 import { FilesView } from './components/views/FilesView';
 import { DevicesView } from './components/views/DevicesView';
 import { AutomationsView } from './components/views/AutomationsView';
 import { ActivityView } from './components/views/ActivityView';
 import { SettingsView } from './components/views/SettingsView';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { LoginPage } from './components/auth/LoginPage';
+import { ProfileSetupPage } from './components/auth/ProfileSetupPage';
 import { api } from './services/api';
-import type { MessageItem, ToolCallInfo } from './types';
+import type { MessageItem } from './types';
 
 const MainContent: React.FC = () => {
   const {
     activeView,
     setActiveView,
     isBackendConnected,
+    connectionState,
     isLoading,
     setMessages,
     addActivity,
     activeConversationId,
     setActiveConversationId,
-    isComputerUseActive,
+    refreshConversations,
+    isHeroLogoOpen,
+    isHeroLogoClosing,
+    heroLogoTrigger,
   } = useNexus();
   const {
     cancelCurrentSpeech,
     getNextTurnId,
     getCurrentTurnId,
-    registerTranscriptHandler,
     setProcessing,
   } = useVoice();
 
   const welcomeExecutedRef = useRef<boolean>(false);
-
-  const [showDisconnectBanner, setShowDisconnectBanner] = useState<boolean>(false);
-
-  useEffect(() => {
-    let timer: any = null;
-    if (!isBackendConnected && !isLoading) {
-      // Delay showing warning banner by 6s to allow initial Python startup
-      timer = setTimeout(() => {
-        setShowDisconnectBanner(true);
-      }, 6000);
-    } else {
-      setShowDisconnectBanner(false);
-    }
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [isBackendConnected, isLoading]);
 
   const activeConversationIdRef = useRef<string | null>(activeConversationId);
   useEffect(() => {
@@ -64,11 +52,7 @@ const MainContent: React.FC = () => {
 
 
   // Central sendUserMessage for global voice / chat processing
-  const sendUserMessage = async (messageText: string, source: 'voice' | 'chat' = 'voice', files: File[] = []) => {    // User voice-input feature is restricted strictly to Conversational Computer-Use Agent
-    if (source === 'voice' && !isComputerUseActive) {
-      console.log('[VOICE INPUT SKIPPED] Voice input is disabled for Simple Chatbot.');
-      return;
-    }
+  const sendUserMessage = async (messageText: string, source: 'voice' | 'chat' = 'voice', files: File[] = []) => {
 
     const query = messageText.trim();
     if (!query) return;
@@ -102,74 +86,58 @@ const MainContent: React.FC = () => {
     });
 
     try {
-      // 3. Send single request to AI
-      console.log(`[FRONTEND API REQUEST] turnId=${turnId}`);
-      const res = await api.sendMessage(
+      console.log(`[FRONTEND STREAM REQUEST] turnId=${turnId}`);
+      let streamedContent = '';
+      let assistantAdded = false;
+
+      await api.sendMessageStream(
         query,
         targetConvId || undefined,
-        files
+        files,
+        (chunk) => {
+          if (turnId !== getCurrentTurnId()) return;
+          streamedContent += chunk;
+          if (!assistantAdded) {
+            assistantAdded = true;
+            setProcessing(false);
+            const assistantMsg: MessageItem = {
+              role: 'assistant',
+              content: streamedContent,
+              model_used: 'gemini-2.5-flash',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            };
+            setMessages((prev) => [...prev, assistantMsg]);
+          } else {
+            setMessages((prev) => {
+              if (prev.length === 0) return prev;
+              const updated = [...prev];
+              const lastIdx = updated.length - 1;
+              if (updated[lastIdx]?.role === 'assistant') {
+                updated[lastIdx] = { ...updated[lastIdx], content: streamedContent };
+              }
+              return updated;
+            });
+          }
+        },
+        (startedConvId) => {
+          if (turnId !== getCurrentTurnId()) return;
+          if (startedConvId) {
+            setActiveConversationId(startedConvId);
+            activeConversationIdRef.current = startedConvId;
+            refreshConversations();
+          }
+        },
+        (completedConvId) => {
+          if (turnId !== getCurrentTurnId()) return;
+          if (completedConvId) {
+            setActiveConversationId(completedConvId);
+            activeConversationIdRef.current = completedConvId;
+            refreshConversations();
+          }
+        }
       );
-      // 4. Validate that turnId is still active/latest
-      if (turnId !== getCurrentTurnId()) {
-        console.warn(`[STALE RESPONSE IGNORED] turnId=${turnId} activeTurnId=${getCurrentTurnId()}`);
-        return;
-      }
-
-      console.log(`[AI RESPONSE RECEIVED] turnId=${turnId} response="${res.response}"`);
-
-      if (res.conversation_id) {
-        setActiveConversationId(res.conversation_id);
-        activeConversationIdRef.current = res.conversation_id;
-      }
-
-      // 5. Display response text smoothly without auto TTS audio playback
-      const finalResponseText = res.response;
-      const words = finalResponseText.split(/\s+/).filter(Boolean);
-
-      const assistantMsg: MessageItem = {
-        role: 'assistant',
-        content: '',
-        model_used: res.model_used || 'gemini-2.5-flash',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        tool_calls: res.tool_calls || [],
-      };
 
       setProcessing(false);
-
-      if (words.length <= 1) {
-        setMessages((prev) => [...prev, { ...assistantMsg, content: finalResponseText }]);
-      } else {
-        setMessages((prev) => [...prev, { ...assistantMsg, content: '' }]);
-        let currentWordIdx = 0;
-        // Adaptive chunk size so typing animation is fast, snappy, and finishes in ~250-300ms
-        const stepSize = Math.max(2, Math.ceil(words.length / 20));
-        const streamInterval = setInterval(() => {
-          currentWordIdx = Math.min(words.length, currentWordIdx + stepSize);
-          const visibleText = words.slice(0, currentWordIdx).join(' ');
-          setMessages((prev) => {
-            if (prev.length === 0) return prev;
-            const updated = [...prev];
-            const lastIdx = updated.length - 1;
-            if (updated[lastIdx].role === 'assistant') {
-              updated[lastIdx] = { ...updated[lastIdx], content: visibleText };
-            }
-            return updated;
-          });
-
-          if (currentWordIdx >= words.length) {
-            clearInterval(streamInterval);
-          }
-        }, 15);
-      }
-
-      if (res.tool_calls && res.tool_calls.length > 0) {
-        addActivity({
-          type: 'tool_exec',
-          title: `Executed ${res.tool_calls.map((t: ToolCallInfo) => t.name).join(', ')}`,
-          detail: finalResponseText.slice(0, 100),
-          status: 'success',
-        });
-      }
     } catch (err: any) {
       if (turnId !== getCurrentTurnId()) {
         console.warn(`[STALE RESPONSE IGNORED ON ERROR] id=${turnId}`);
@@ -206,17 +174,6 @@ const MainContent: React.FC = () => {
     sendUserMessageRef.current = sendUserMessage;
   });
 
-  // User voice input is strictly for Conversational Computer-Use Agent. Unregister/ignore for simple chatbot.
-  useEffect(() => {
-    if (!isComputerUseActive) return;
-    const unregister = registerTranscriptHandler((transcriptText) => {
-      if (isComputerUseActive && transcriptText && transcriptText.trim()) {
-        sendUserMessageRef.current(transcriptText, 'voice');
-      }
-    });
-    return unregister;
-  }, [registerTranscriptHandler, isComputerUseActive]);
-
   // Session startup: Ready and idle until user provides first input
   useEffect(() => {
     if (welcomeExecutedRef.current) return;
@@ -227,15 +184,7 @@ const MainContent: React.FC = () => {
   const renderView = () => {
     switch (activeView) {
       case 'dashboard':
-        return <DashboardView />;
       case 'assistant':
-        return (
-          <SimpleChatbotView
-            onSendMessage={(msg, files) =>
-              sendUserMessage(msg, 'chat', files)
-            }
-          />
-        );
       case 'computer_use':
         return <ConvoComputerUseAgentView />;
       case 'system':
@@ -253,37 +202,36 @@ const MainContent: React.FC = () => {
       case 'settings':
         return <SettingsView />;
       default:
-        return <DashboardView />;
+        return <ConvoComputerUseAgentView />;
     }
   };
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-[#060911] text-slate-100 select-none">
-      {/* Top Header HUD - Only visible in Conversational Computer-Use Agent context.
-           Hidden in Simple Chatbot context (including Settings, Dashboard, etc. accessed from Simple Chatbot). */}
-      {isComputerUseActive && <Header />}
+      {/* Top Header HUD - Always visible for Seyal AI Conversational Computer-Use Agent */}
+      <Header />
 
-
-      {/* Backend connection warning banner if not connected after grace period */}
-      {showDisconnectBanner && (
-        <div className="bg-rose-500/20 border-b border-rose-500/40 text-rose-300 text-xs px-6 py-2 flex items-center justify-between font-tech shrink-0">
-          <span>
-            ⚠️ Connecting to AI Engine (http://127.0.0.1:8000)...
+      {/* Sleek connection state HUD — only shows if actively reconnecting */}
+      {connectionState === 'RECONNECTING' && (
+        <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-xs px-6 py-1.5 flex items-center justify-between font-tech shrink-0 transition-all duration-300">
+          <span className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
+            Connecting to AI Engine... (automatic background recovery active)
           </span>
-          <span className="animate-pulse font-mono font-bold">RECONNECTING...</span>
+          <span className="font-mono text-[11px] opacity-80">Auto-Reconnecting</span>
         </div>
       )}
 
       {/* Main OS Body: Sidebar + Active View Workspace */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar onSelectPrompt={(prompt) => sendUserMessage(prompt, 'chat')} />
-        <main className={`flex-1 min-h-0 overflow-y-auto ${activeView === 'assistant' ? 'p-0' : 'p-4 md:p-6 lg:p-7'}`}>
-          {/* Back arrow — shown on all secondary views so the user can return to the chat screen */}
-          {activeView !== 'assistant' && (
+        <main className={`flex-1 min-h-0 overflow-y-auto ${activeView === 'assistant' || activeView === 'computer_use' || activeView === 'settings' ? 'p-0' : 'p-4 md:p-6 lg:p-7'}`}>
+          {/* Back arrow — shown on secondary views (for convo agent settings, back button is embedded inside the search bar) */}
+          {activeView !== 'assistant' && activeView !== 'computer_use' && activeView !== 'settings' && (
             <button
               onClick={() => setActiveView('assistant')}
               className="mb-4 flex items-center gap-2 text-slate-400 hover:text-cyan-300 transition-colors group"
-              title="Back to Chat"
+              title="Back to Agent"
             >
               <span className="w-7 h-7 rounded-lg bg-slate-900/80 border border-slate-700/70 hover:border-cyan-500/50 flex items-center justify-center transition-colors group-hover:bg-slate-800">
                 <ArrowLeft className="w-4 h-4" />
@@ -296,17 +244,19 @@ const MainContent: React.FC = () => {
       </div>
 
       <ConfirmationModal />
+
+      {/* Global Center Hero App Logo Popup (Synchronously hidden on Settings view, zero flicker on return) */}
+      {(isHeroLogoOpen || isHeroLogoClosing) && (
+        <div className={activeView === 'settings' ? 'hidden pointer-events-none' : 'contents'}>
+          <HeroAgentLogoOrb key={heroLogoTrigger} isClosing={isHeroLogoClosing} />
+        </div>
+      )}
     </div>
   );
 };
 
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { LoginPage } from './components/auth/LoginPage';
-import { ProfileSetupPage } from './components/auth/ProfileSetupPage';
-
 const AuthenticatedApp: React.FC = () => {
-  const { session, loading } = useAuth();
-  const [profileLoading, setProfileLoading] = useState(true);
+  const { session } = useAuth();
   const [profileSetupRequired, setProfileSetupRequired] = useState(false);
   const checkedUserIdRef = useRef<string | null>(null);
 
@@ -315,65 +265,64 @@ const AuthenticatedApp: React.FC = () => {
   useEffect(() => {
     if (!userId) {
       checkedUserIdRef.current = null;
-      setProfileLoading(false);
       return;
     }
 
-    // If profile has already been verified for this logged-in user, do not trigger loading screen or re-sync
+    // If profile has already been verified for this logged-in user, do not re-sync
     if (checkedUserIdRef.current === userId) {
       return;
     }
 
     const checkAndSyncProfile = async () => {
       try {
-        setProfileLoading(true);
         const res = await api.getProfile();
 
         if (res.setup_required) {
-          // If setup is required in PostgreSQL, check if we have user metadata from signup
+          // If setup is required in local DB, check if user already has profile in Supabase Cloud
           const metadata = session?.user?.user_metadata;
-          if (metadata && metadata.name && metadata.age && metadata.gender) {
+          const hasName = Boolean(metadata?.name || metadata?.full_name);
+          const hasMotherTongue = Boolean(metadata?.mother_tongue);
+          const hasKnownLanguages = Boolean(
+            (Array.isArray(metadata?.known_languages) && metadata.known_languages.length > 0) ||
+            metadata?.known_languages
+          );
+
+          if (hasName && hasMotherTongue && hasKnownLanguages) {
             try {
-              // Silently sync metadata to backend PostgreSQL
+              const langs = Array.isArray(metadata.known_languages)
+                ? metadata.known_languages
+                : [metadata.known_languages];
+
               await api.setupProfile({
-                name: metadata.name,
-                age: Number(metadata.age),
-                gender: metadata.gender,
+                name: (metadata.name || metadata.full_name).trim(),
+                dob: metadata.dob || undefined,
+                age: Number(metadata.age) || 25,
+                gender: metadata.gender || 'other',
+                mother_tongue: metadata.mother_tongue,
+                known_languages: langs,
               });
               setProfileSetupRequired(false);
             } catch (syncErr) {
-              console.error('Failed to sync signup metadata to backend:', syncErr);
-              setProfileSetupRequired(true);
+              console.warn('Failed to sync cloud profile to local DB (will not block user):', syncErr);
+              setProfileSetupRequired(false);
             }
           } else {
+            // Truly new user with no profile data in DB -> show Onboarding Wizard
             setProfileSetupRequired(true);
           }
         } else {
           setProfileSetupRequired(false);
         }
         checkedUserIdRef.current = userId;
-      } catch (err) {
-        console.error('Failed to fetch profile:', err);
-        // Avoid getting permanently stuck on loading screen on error
+      } catch (err: any) {
+        console.warn('Profile check notice (proceeding to app):', err);
+        setProfileSetupRequired(false);
         checkedUserIdRef.current = userId;
-      } finally {
-        setProfileLoading(false);
       }
     };
 
     checkAndSyncProfile();
   }, [userId, session]);
-
-  if (loading || (session && profileLoading)) {
-    return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-[#060911] text-slate-100 font-sans">
-        <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4" />
-        <p className="text-sm font-medium text-slate-400">
-          {loading ? 'Connecting to Seyal AI Auth...' : 'Loading User Profile...'}
-        </p>
-      </div>
-    );
-  }
 
   if (!session) {
     return <LoginPage />;

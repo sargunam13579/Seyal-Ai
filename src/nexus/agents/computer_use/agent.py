@@ -38,10 +38,15 @@ log = get_logger("agents.computer_use")
 COMPUTER_USE_SYSTEM_PROMPT = """You are NEXUS Conversational Computer-Use Agent, a friendly, warm, and highly skilled AI companion that operates a Windows PC for the user.
 
 PERSONA & CONVERSATIONAL TONE:
-- Talk in a warm, cheerful, friendly, and natural conversational tone (like a close tech buddy / pair programmer).
+- Talk in a warm, cheerful, friendly, and natural conversational tone (like a trusted tech partner / pair programmer).
 - Avoid stiff, robotic, or overly formal corporate responses.
-- When narrating what you are doing, be encouraging and friendly (e.g. "Got it! Opening Camera for you now...", "Taking photo and closing camera...", "All done! I've deleted the chats for you 🎉").
-- If the user uses Tamil or Tanglish, feel free to respond in warm, natural Tanglish/English (e.g. "Done-nga! Camera open panni photo eduthu close panniten", "Kandippa, chats delete panniyachu").
+- When narrating what you are doing, be encouraging, precise, and friendly.
+- UNIVERSAL MULTILINGUAL ADAPTATION & STRICT LANGUAGE MIRRORING:
+  * If the user speaks/types in pure Tamil (e.g. "Chrome ஐ open பண்ணு"), you MUST respond strictly in pure Tamil.
+  * If the user speaks/types in Tanglish (casual Tamil written in English letters, e.g. "Chrome ah open pannu", "YouTube po"), you MUST respond strictly in natural Tanglish (e.g. "Sari-nga, Chrome open panren!").
+  * If the user speaks/types in English (e.g. "Open Chrome"), you MUST respond strictly in English.
+  * If the user speaks/types in Hindi (e.g. "Chrome kholo"), you MUST respond strictly in Hindi.
+  * Seamlessly mirror whatever language and dialect the user communicated in.
 
 TASK & CLOSED-LOOP VISION REASONING:
 You are given the user's high-level goal, the current screenshot (with Set-of-Marks numerical badges on interactive UI elements), detected element coordinates, live system status, and previous action history.
@@ -71,15 +76,14 @@ Available action types:
 
 🎯 CORE LIFECYCLE RULE 1: APP LIFECYCLE & NO UNWANTED AUTO-CLOSE (CRITICAL):
 1. **NO UNWANTED AUTO-CLOSE**:
-   - NEVER automatically close external applications (Camera, VS Code, Google Chrome, Folders, Notepad) upon task completion unless the user EXPLICITLY told you to close it (e.g. "close pannu", "close camera", "close chrome")!
+   - NEVER automatically close external applications (Camera, VS Code, Google Chrome, Folders, Notepad) upon task completion unless the user EXPLICITLY told you to close it!
    - NEVER touch or close unrelated background applications (such as user's open Google Chrome, VS Code, or Explorer windows).
    - Keep applications open so the user can continue their workflow seamlessly.
 
-2. **ALWAYS ASK WHAT TO DO NEXT ("Next enna pannattum?")**:
-   - Whenever you complete the user's requested task, you MUST enthusiastically confirm completion and ask what to do next in your narration:
-     * e.g. "Photo எடுத்துட்டேன்-பா! Next என்ன பண்ணட்டும்-ங்க? 📸✨" / "Photo eduthuten-pa! Next enna pannattum?"
-     * e.g. "VS Code open பண்ணிட்டேன்! Next என்ன பண்ணட்டும்? 💻" / "VS Code open panniten! Next enna pannattum-nga?"
-     * e.g. "Desktop Java folder open பண்ணிட்டேன்-ங்க! Next என்ன பண்ணட்டும்? 📂"
+2. **ALWAYS ASK WHAT TO DO NEXT**:
+   - Whenever you complete the user's requested task, you MUST enthusiastically confirm completion and ask what to do next in your spoken narration:
+     * Respond in the EXACT SAME LANGUAGE and dialect the user communicated in (e.g. English, Tamil, Tanglish, Hindi, Spanish, French, German, Japanese, etc.).
+     * Confirm what action was performed and invite their next instruction.
 
 3. **INNER TASKS PROTECTION (NEXUS APPLICATION)**:
    - STRICT PROHIBITION: NEVER output `window_close` or press Alt+F4 for tasks inside Nexus (like deleting chat items or settings)!
@@ -88,66 +92,46 @@ Available action types:
 1. **Direct Data Answers**:
    - If the user asks for data, questions, weather, battery percentage, system info, calculations, or chat:
    - Answer DIRECTLY in "narration" using live telemetry or knowledge!
-   - STRICT PROHIBITION: NEVER open a browser, Google Chrome, or search windows unless the user explicitly requested: "Google search pannu", "search on browser", "open chrome".
+   - STRICT PROHIBITION: NEVER open a browser, Google Chrome, or search windows unless the user explicitly requested: "Google search", "search on browser", "open chrome".
 2. **Perform Actions Strictly on User Need**:
    - Only open, click, type, or close what the user explicitly asked for.
 
 🎯 CORE LIFECYCLE RULE 3: HIERARCHICAL SUB-TASK SPLITTING & CLOSED-LOOP SCREEN VERIFICATION:
-When given compound or multi-item requests (e.g., `"hello" and "hiii" chats ah delete pannu`):
+When given compound or multi-item requests:
 1. **Split into ordered sub-tasks**:
-   - Task 1: Delete "hello" chat -> Sub-task 1.1: Click 3-dot options menu -> Sub-task 1.2: Click "Delete" -> Sub-task 1.3: Verify "hello" chat is deleted.
-   - Task 2: Delete "hiii" chat -> Sub-task 2.1: Click 3-dot options menu -> Sub-task 2.2: Click "Delete" -> Sub-task 2.3: Verify "hiii" chat is deleted.
-   - Finish: Output `finish` and ask *"Next enna pannattum-nga?"*!
-
+   - Plan and execute each sub-task sequentially with screen verification after each step.
 2. **STRICT VERIFICATION & STEP ROLLBACK**:
    - Inspect screen after each sub-task to verify execution.
    - If a click missed or dropdown didn't appear, immediately roll back to previous sub-task and re-target coordinates accurately.
-
 3. **COMPOUND TASKS & MUST-COMPLETE MANDATE (CRITICAL)**:
-   - When user gives a compound instruction (e.g., "camera open panni, one pic adu" / "notepad open pannitu text type pannu"):
+   - When user gives a compound instruction (e.g. open camera and take photo, open notepad and type notes):
      * Clause 1: Open the app.
      * Clause 2: Perform the inner action (Take photo, type text, click button).
      * STRICT PROHIBITION: NEVER output `finish` after merely opening the app! You MUST execute the requested action inside the app before finishing!
-   - COLLOQUIAL VOCABULARY:
-     * In Tamil/Tanglish, "adu" or "edu" means "எடு" (take / capture)!
-     * "pic adu" / "pic edu" / "photo adu" / "photo edu" = TAKE A PHOTO!
-     * "screenshot adu" / "screenshot edu" = TAKE A SCREENSHOT!
-   - CAMERA PHOTO CAPTURE:
-     * In Windows Camera: Once camera is open and focused, capture a photo by:
-       - Clicking the round Camera Shutter / Take Photo button on the right edge of viewfinder, OR
-       - Using `{"action_type": "key_press", "key": "space"}` or `{"action_type": "key_press", "key": "enter"}`!
-     * Once captured, output `{"action_type": "finish"}` with narration:
-       "Camera open panni photo eduthuten-pa! 📸✨ Next என்ன பண்ணட்டும்?"
+   - Camera Photo Capture:
+     * In Windows Camera: Once camera is open and focused, capture a photo using the shutter button or space/enter key, then finish with spoken confirmation.
 
-🎯 CORE LIFECYCLE RULE 3: MULTILINGUAL COMPREHENSION (TAMIL, TANGLISH, ENGLISH) & ATTRACTIVE CONVERSATIONAL REPLAY:
+🎯 CORE LIFECYCLE RULE 4: UNIVERSAL MULTILINGUAL COMPREHENSION & NATURAL SPOKEN REPLAY:
 1. **Multilingual Understanding**:
-   - Fluently understand user instructions in pure Tamil (e.g. "VS Code open பண்ணு", "Desktop-la இருக்குற Java folder open பண்ணு", "New file create பண்ணி palindrome code போடு", "Run பண்ணு"), Tanglish, or English.
+   - Fluently understand user instructions in any language: English, Tamil, Tanglish, Hindi, Spanish, French, etc.
 2. **Fast & Attractive Spoken Narration**:
-   - Deliver enthusiastic, charming, and snappy responses in natural conversational Tamil / Tanglish:
-     * When opening an app: "VS Code open பண்ணிட்டேன்-பா! 💻✨" / "VS Code open panniten!"
-     * When navigating folders: "Java folder-ah open பண்ணிட்டேன்-பா! 📂" / "Java folder open panniten-ga 👍"
-     * When writing code & asking confirmation: Use `ask_user` with "String palindrome code type பண்ணி save பண்ணிட்டேன்! Run பண்ணட்டா? 🚀"
-     * When executing code/action: "Done-nga! Code successfully run பண்ணியாச்சு! Output பாருங்க 🎉"
-   - Always use enthusiastic, lively completion markers: "Done-nga!", "Mudichuten!", "Finish panniten!", "Panniten-pa!".
+   - Deliver enthusiastic, charming, and snappy spoken narration in the user's natural language and tone.
+   - Always confirm completed work and ask what to do next.
 
 ⚡ EFFICIENCY, SHORTEST PATH & QUICK ACTIONS RULES:
 1. QUICK SETTINGS & SYSTEM TOGGLES (Energy Saver, Battery Saver, Wi-Fi, Bluetooth, Airplane Mode, Night Light, Volume, Brightness):
-   - FASTEST 2-STEP METHOD:
-     * Step 1: Open Windows Quick Settings using `{"action_type": "hotkey", "key": "win+a"}`.
-     * Step 2: In Quick Settings popup, click the button for "Energy Saver" / "Battery Saver" / "Wi-Fi" / "Bluetooth", and output `{"action_type": "finish"}`!
-   - STRICT PROHIBITION: NEVER launch full Settings app (`ms-settings:`) when Quick Settings (`win+a`) has the toggle.
-
-2. SYSTEM STATUS QUERIES (Battery Percentage, Network Name, Date/Time, Volume):
-   - Answer directly using live system status telemetry provided in the prompt. State the answer in "narration" and output `{"action_type": "finish"}` immediately in 1 step!
-
+   - Open Windows Quick Settings using `{"action_type": "hotkey", "key": "win+a"}`.
+   - Click the appropriate toggle and output `finish`.
+2. SYSTEM STATUS QUERIES:
+   - Answer directly using live system status telemetry provided in the prompt.
 3. DISTINGUISHING COMPUTER ACTIONS VS CONVERSATIONAL QUESTIONS:
-   - PROHIBITION: NEVER click or type into the active NexUs chat input box on screen!
+   - NEVER click or type into the active NexUs chat input box on screen!
    - If user asks a conversational or factual question, answer directly in "narration" and output `finish`.
 
 Output format (strictly JSON object only):
 {
   "thought": "Step-by-step reasoning explaining which sub-task is being executed and verified",
-  "narration": "Friendly conversational sentence in attractive Tamil/Tanglish spoken to the user (e.g. 'Done-nga! VS Code open panniten 🎉', 'Java folder open panniten-pa! 👍')",
+  "narration": "Friendly conversational sentence in user's natural language spoken to the user",
   "action": {
     "action_type": "open_app | click | double_click | right_click | middle_click | type_text | clipboard_paste | hotkey | key_press | mouse_scroll | mouse_drag | focus_window | switch_window | window_minimize | window_maximize | window_close | wait | ask_user | finish",
     "x": 500,
@@ -161,23 +145,60 @@ Output format (strictly JSON object only):
 }
 """
 
-CHATBOT_SYSTEM_PROMPT = """You are Seyal AI (Jarvis), a brilliant, warm, charming, and highly helpful AI companion on Windows.
-You excel at both deep conversation (answering any question, coding, math, science, creative ideas, jokes, empathy) and operating the PC.
+CHATBOT_SYSTEM_PROMPT = """You are Seyal AI, an intelligent, empathetic, warm, and highly capable AI companion on Windows.
+You excel at both deep conversation (answering any question, coding, math, science, creative writing, empathy, daily life) and desktop computing.
 
-PERSONALITY & SPEAKING STYLE:
-- Speak in a natural, lively, and attractive Tanglish (Tamil + English blend) or pure English/Tamil depending on how the user speaks.
-- Be polite, witty, enthusiastic, and human-like (e.g., "Hello-nga! Nalla irukinga-la? 😊", "Kandippa solren!", "Super question-nga!", "Idho details...").
-- Never sound robotic, cold, or boring.
-- When answering questions or explaining concepts, give clear, accurate, and structured explanations.
-- End your responses warmly, inviting the next thought or task ("Next enna seiyattum, sollunga! ✨").
+UNIVERSAL MULTILINGUAL COMMUNICATION:
+- Always adapt and reply in the EXACT SAME LANGUAGE and style the user speaks to you:
+  * English: fluent, natural, engaging English.
+  * Tamil / Tanglish: natural, warm Tamil or Tanglish.
+  * Hindi: natural, polite, engaging Hindi.
+  * Any other language (Spanish, French, Telugu, Malayalam, German, etc.): respond fluently in that respective language.
+- Speak naturally, warmly, and intelligently. Never sound stiff, robotic, or repetitive.
+- Keep answers concise, clear, and engaging.
 
-FACTUAL INTEGRITY & CHAT HISTORY AWARENESS:
+FACTUAL INTEGRITY & SIDEBAR AWARENESS:
 - Always base factual statements about user data, saved sessions, and sidebar chat history STRICTLY on the verified facts provided below.
-- NEVER fabricate, approximate, or hallucinate numbers or topics (e.g., NEVER say "oru 30 chats-uku mela irukku" or invent fake chat names or random topics).
-- When the user asks about chats (e.g., "hello name la ethana chat erukku", "ethana chat irukku", "how many chats"):
-  * Distinguish filter keywords from greetings! If the user says "hello name la" or "pic chats", "hello" or "pic" is the TARGET FILTER, NOT a greeting to you.
-  * Report the EXACT verified counts and titles from the active sidebar (and mention the Simple Chatbot sidebar if relevant).
+- NEVER fabricate, approximate, or hallucinate numbers or topics.
+- When the user asks about chats or search filters, report the EXACT verified counts and titles from context.
 """
+
+
+UNIVERSAL_CONVO_FALLBACK = "I'm listening! How can I help you today? 😊✨"
+
+
+async def generate_task_acknowledgment(goal: str, router: ModelRouter | None = None) -> str:
+    """
+    Generate an instantaneous, natural spoken task acknowledgment in the user's EXACT language.
+    True Universal Architecture: Powered by Gemini Flash across 100+ languages (English, Tamil,
+    Tanglish, Hindi, Telugu, Malayalam, Spanish, French, German, Japanese, Arabic, etc.).
+    Zero hardcoded if/else language checks.
+    """
+    clean_name = goal[:35].strip()
+    try:
+        r = router or ModelRouter()
+        await r.initialize()
+        prompt = (
+            f"The user gave a computer command: \"{goal}\".\n"
+            "Generate a natural, enthusiastic spoken acknowledgment (3 to 6 words) stating that you are starting this task right now.\n"
+            "MANDATORY: You MUST reply in the EXACT SAME LANGUAGE and dialect that the user used.\n"
+            "Output strictly ONLY the spoken sentence (no quotes, no preamble)."
+        )
+        res = await asyncio.wait_for(
+            r.generate(
+                messages=[LLMMessage(role="user", content=prompt)],
+                tier=ModelTier.FAST,
+                temperature=0.3,
+            ),
+            timeout=1.5,
+        )
+        ack = (res.content or "").strip().replace('"', '')
+        if ack and len(ack) < 100:
+            return ack
+    except Exception as e:
+        log.warning("Dynamic task acknowledgment notice: %s", e)
+
+    return f"Starting {clean_name} now! 🚀"
 
 
 class ConversationalComputerUseAgent:
@@ -302,42 +323,87 @@ class ConversationalComputerUseAgent:
         - HIGH: Life milestones, future dates, user preferences (e.g. interview, exam, preferences) -> Stored in USER_DEFINED_INFO.
         """
         clean = user_input.strip()
+        if len(clean) < 6:
+            return
+
+        # 1. Fast local discard for trivial, transient queries
         lower = clean.lower()
+        if any(lower.startswith(w) for w in ("what is the weather", "weather in", "how is the weather", "battery", "time in", "calc ", "calculate ")):
+            return
 
-        # 1. LOW: Immediate discards
-        disposable_triggers = (
-            "weather", "climate", "battery", "time", "hello", "hi", "hey",
-            "open ", "close ", "click ", "type ", "screenshot", "stop", "cancel"
-        )
-        if any(dt in lower for dt in disposable_triggers) and not any(
-            kw in lower for kw in ["interview", "exam", "building", "project", "prefer", "my name"]
-        ):
-            return  # LOW -> Do not store in permanent memory
+        # 2. Fast Universal LLM Extraction
+        try:
+            await self._router.initialize()
+            prompt = (
+                "Analyze this user message for long-term memory:\n"
+                f'"{clean}"\n\n'
+                "Classify into ONE of these categories:\n"
+                "1. LOW: Disposable single-turn query (weather, time, battery, math calculation, casual greeting 'hi/hello', quick single action). Return category 'LOW'.\n"
+                "2. HIGH_EVENT: Future or life event with a target date or milestone (e.g. interview, travel, client meeting, exam, doctor visit, wedding, deadline).\n"
+                "3. HIGH_PREFERENCE: Explicit user preference (e.g. preferred language, communication tone, explanation length, personal bio details, alias).\n"
+                "4. MEDIUM_PROJECT: Ongoing development project, research work, or multi-day goal the user is actively working on.\n\n"
+                "Output STRICTLY valid JSON ONLY in this format, nothing else:\n"
+                '{"category": "LOW" | "HIGH_EVENT" | "HIGH_PREFERENCE" | "MEDIUM_PROJECT", "details": "summary of event/preference/project", "event_date": "YYYY-MM-DD or null"}'
+            )
 
-        # 2. HIGH: Life milestones, events, preferences
-        high_patterns = (
-            "interview", "exam", "presentation", "meeting", "deadline", "appointment",
-            "tomorrow i have", "today i have", "my name is", "i prefer", "prefer short",
-            "enakku pidikkum", "naan oru"
-        )
-        if any(hp in lower for hp in high_patterns):
-            try:
-                import datetime
-                from nexus.memory.manager import MemoryManager
-                from nexus.memory.types import MemoryCategory
-                manager = MemoryManager()
-                now = datetime.datetime.now()
-                target_date = now.date()
-                if "tomorrow" in lower or "naalaiki" in lower:
-                    target_date = (now + datetime.timedelta(days=1)).date()
-                elif "yesterday" in lower or "nethu" in lower:
-                    target_date = (now - datetime.timedelta(days=1)).date()
+            res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.0,
+                ),
+                timeout=2.0,
+            )
+            raw = (res.content or "").strip()
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw).strip()
 
+            data = json.loads(raw)
+            category = data.get("category", "LOW")
+            details = data.get("details", "").strip()
+            event_date = data.get("event_date")
+
+            if category == "LOW" or not details:
+                return
+
+            import datetime
+            from nexus.memory.manager import MemoryManager
+            from nexus.memory.types import MemoryCategory
+            manager = MemoryManager()
+            now = datetime.datetime.now()
+            slug = re.sub(r'[^a-zA-Z0-9]+', '_', details[:25]).strip('_').lower() or "item"
+
+            if category == "HIGH_PREFERENCE":
+                payload = {"text": details, "created_at": now.isoformat()}
+                await manager.storage.store(
+                    key=f"pref_{slug}",
+                    value=payload,
+                    category=MemoryCategory.USER_PREFERENCE,
+                    tags=["importance:high", "preference"],
+                    metadata=payload,
+                )
+                await manager.storage.store(
+                    key="user_preference",
+                    value=payload,
+                    category=MemoryCategory.USER_PREFERENCE,
+                    tags=["importance:high", "preference"],
+                    metadata=payload,
+                )
+                log.info("Saved universal user preference: '%s'", details)
+
+            elif category == "HIGH_EVENT":
                 payload = {
-                    "text": clean,
+                    "text": details,
                     "created_at": now.isoformat(),
-                    "event_date": target_date.isoformat(),
+                    "event_date": event_date or (now + datetime.timedelta(days=1)).date().isoformat(),
                 }
+                await manager.storage.store(
+                    key=f"event_{slug}",
+                    value=payload,
+                    category=MemoryCategory.USER_DEFINED_INFO,
+                    tags=["importance:high", "milestone"],
+                    metadata=payload,
+                )
                 await manager.storage.store(
                     key="latest_user_milestone",
                     value=payload,
@@ -345,28 +411,21 @@ class ConversationalComputerUseAgent:
                     tags=["importance:high", "milestone"],
                     metadata=payload,
                 )
-                log.info("Saved HIGH-importance milestone with event_date=%s: '%s'", target_date, clean)
-            except Exception as e:
-                log.debug("Memory store notice: %s", e)
-            return
+                log.info("Saved universal milestone: '%s' (event_date=%s)", details, payload["event_date"])
 
-        # 3. MEDIUM: Ongoing projects and dev tasks
-        medium_patterns = (
-            "building", "developing", "creating a", "working on", "timetable",
-            "project", "app create", "generator", "making a"
-        )
-        if any(mp in lower for mp in medium_patterns):
-            try:
-                import datetime
-                from nexus.memory.manager import MemoryManager
-                from nexus.memory.types import MemoryCategory
-                manager = MemoryManager()
-                now = datetime.datetime.now()
+            elif category == "MEDIUM_PROJECT":
                 payload = {
-                    "text": clean,
+                    "text": details,
                     "created_at": now.isoformat(),
                     "updated_at": now.isoformat(),
                 }
+                await manager.storage.store(
+                    key=f"project_{slug}",
+                    value=payload,
+                    category=MemoryCategory.CURRENT_TASK,
+                    tags=["importance:medium", "project"],
+                    metadata=payload,
+                )
                 await manager.storage.store(
                     key="active_project_context",
                     value=payload,
@@ -374,17 +433,16 @@ class ConversationalComputerUseAgent:
                     tags=["importance:medium", "project"],
                     metadata=payload,
                 )
-                log.info("Saved MEDIUM-importance project context: '%s'", clean)
-            except Exception as e:
-                log.debug("Memory store notice: %s", e)
+                log.info("Saved universal project context: '%s'", details)
+
+        except Exception as e:
+            log.debug("Universal memory extraction notice: %s", e)
 
     async def generate_welcome_greeting(self, user_name: str = "Friend") -> str:
         """
-        Generate a dynamic, human-like, context-aware welcome greeting based on:
-        - Time of day (Morning, Afternoon, Evening)
-        - HIGH-importance memories with temporal decay (today vs yesterday vs expired)
-        - MEDIUM-importance memories (active project within 7 days)
-        - Natural Tanglish / Tamil persona
+        Universal Context-Driven Proactive Conversational Opener (ChatGPT-Style).
+        Dynamically synthesizes a warm, proactive conversational starter tailored to the
+        user's role, recent conversation history, milestones, and natural language.
         """
         import datetime
         now = datetime.datetime.now()
@@ -393,273 +451,246 @@ class ConversationalComputerUseAgent:
 
         if 5 <= hour < 12:
             time_greeting = "Good morning"
+            time_period = "morning"
         elif 12 <= hour < 17:
             time_greeting = "Good afternoon"
+            time_period = "afternoon"
         elif 17 <= hour < 22:
             time_greeting = "Good evening"
+            time_period = "evening"
         else:
             time_greeting = "Hey"
+            time_period = "late night"
 
-        # Check for High & Medium memories
-        milestone_data = None
-        project_data = None
+        # Check stored memories dynamically across all categories
+        milestones = []
+        projects = []
+        preferences = []
         try:
             from nexus.memory.manager import MemoryManager
             manager = MemoryManager()
-            rec_high = await manager.storage.find_by_key("latest_user_milestone")
-            if rec_high and rec_high.value:
-                milestone_data = rec_high.value if isinstance(rec_high.value, dict) else {"text": str(rec_high.value)}
-
-            rec_med = await manager.storage.find_by_key("active_project_context")
-            if rec_med and rec_med.value:
-                project_data = rec_med.value if isinstance(rec_med.value, dict) else {"text": str(rec_med.value)}
+            all_recs = await asyncio.wait_for(manager.storage.search(limit=25), timeout=0.8)
+            for rec in all_recs:
+                val = rec.value if isinstance(rec.value, dict) else {"text": str(rec.value)}
+                t = val.get("text", str(rec.value))
+                if not t:
+                    continue
+                m_date = val.get("event_date")
+                if m_date:
+                    try:
+                        ed = datetime.date.fromisoformat(m_date)
+                        diff = (today - ed).days
+                        rel = "tomorrow" if diff == -1 else ("today" if diff == 0 else ("yesterday" if diff == 1 else f"{diff} days ago"))
+                        milestones.append(f"{t} (Scheduled for: {rel})")
+                    except Exception:
+                        milestones.append(t)
+                elif "project" in rec.tags or rec.category.value == "current_task" or "project" in rec.key:
+                    projects.append(t)
+                elif "preference" in rec.tags or rec.category.value in ("user_preference", "app_preference") or "pref" in rec.key:
+                    preferences.append(t)
+                elif rec.key in ("latest_user_milestone", "active_project_context", "user_preference"):
+                    if "milestone" in rec.key:
+                        milestones.append(t)
+                    elif "project" in rec.key:
+                        projects.append(t)
+                    else:
+                        preferences.append(t)
         except Exception as e:
-            log.debug("Memory check notice for greeting: %s", e)
+            log.debug("Dynamic memory retrieval notice for welcome greeting: %s", e)
 
-        # 1. Temporal reasoning for HIGH-priority milestones (Interview, Exam, Presentation)
-        if milestone_data and "text" in milestone_data:
-            text = milestone_data["text"]
-            lower_text = text.lower()
-            event_date_str = milestone_data.get("event_date")
-            days_diff = None
-            if event_date_str:
-                try:
-                    event_date = datetime.date.fromisoformat(event_date_str)
-                    days_diff = (today - event_date).days
-                except Exception:
-                    days_diff = None
+        # Collect recent conversation summaries across all history
+        recent_topics: list[str] = []
+        try:
+            from nexus.database.engine import get_session
+            from nexus.database.repositories.conversation import ConversationRepository
+            async with get_session() as db_session:
+                repo = ConversationRepository(db_session)
+                recent_convs, _ = await asyncio.wait_for(repo.list_conversations(offset=0, limit=10), timeout=0.8)
+                for conv in recent_convs:
+                    if conv.summary and conv.summary.strip():
+                        raw_s = conv.summary.strip()
+                        s = re.sub(r"^\[.*?\]\s*", "", raw_s).strip()
+                        if not s:
+                            s = raw_s
+                        lower_s = s.lower()
+                        if not any(g in lower_s for g in ("new chat", "untitled", "conversation", "test chat")):
+                            conv_date = conv.created_at.date() if hasattr(conv.created_at, 'date') else None
+                            if conv_date:
+                                days_ago = (today - conv_date).days
+                                time_desc = "today" if days_ago == 0 else ("yesterday" if days_ago == 1 else f"{days_ago} days ago")
+                                recent_topics.append(f"'{s}' ({time_desc})")
+                            else:
+                                recent_topics.append(f"'{s}'")
+                            if len(recent_topics) >= 3:
+                                break
+        except Exception as e:
+            log.debug("Conversation title history check notice: %s", e)
 
-            # Only follow up if the event is today or was yesterday (within 2 days)
-            if days_diff is not None and days_diff in (0, 1):
-                if "interview" in lower_text:
-                    if days_diff == 0:
-                        return f"Hey {user_name}, {time_greeting}-nga! Innaiki unga interview irukku-la? All the best-nga! Confidence-ah pannunga! 🌟"
-                    else:
-                        return f"Hey {user_name}, {time_greeting}-nga! Nethu unga interview eppadi pochu? Nalla pannengala? Today enna plan, sollunga! 😊✨"
-                elif "exam" in lower_text:
-                    if days_diff == 0:
-                        return f"Hey {user_name}, {time_greeting}-nga! Innaiki unga exam irukku-la? All the very best! Nalla ezhudhunga! 🎓✨"
-                    else:
-                        return f"Hey {user_name}, {time_greeting}-nga! Nethu exam eppadi pochu? Nalla ezhudhineengala? Today enna seiyalam, sollunga! 🎓✨"
-                elif "presentation" in lower_text or "meeting" in lower_text:
-                    return f"{time_greeting} {user_name}-nga! Unga presentation / meeting nalla mudinjadha? Next enna task pannattum, sollunga! 🚀"
+        # Dynamic, Universal, Context-Aware Proactive Greeting via Fast LLM (Zero-Hang Timeout)
+        try:
+            await self._router.initialize()
+            context_items = []
+            if milestones:
+                context_items.append(f"Upcoming Milestones/Events: {', '.join(milestones[:2])}")
+            if projects:
+                context_items.append(f"Ongoing Projects: {', '.join(projects[:2])}")
+            if recent_topics:
+                context_items.append(f"Recent Topics: {', '.join(recent_topics[:3])}")
+            if preferences:
+                context_items.append(f"User Preferences: {', '.join(preferences[:2])}")
 
-        # 2. Check for MEDIUM-priority active projects within 7 days
-        if project_data and "text" in project_data:
-            proj_text = project_data["text"]
-            lower_p = proj_text.lower()
-            created_str = project_data.get("created_at")
-            is_recent = True
-            if created_str:
-                try:
-                    created_dt = datetime.datetime.fromisoformat(created_str)
-                    if (now - created_dt).days > 7:
-                        is_recent = False
-                except Exception:
-                    pass
+            context_block = "\n".join(f"- {c}" for c in context_items) if context_items else "No specific prior task context."
+            prefers_tamil = any("tamil" in str(p).lower() for p in preferences)
 
-            if is_recent:
-                if "timetable" in lower_p:
-                    return f"Vanakkam {user_name}-nga! Ungaloda timetable generator project work eppadi pogudhu? Innaiki adhai continue pannalama, illa vera task edhavadhu seiyalama? 📅✨"
-                else:
-                    short_p = proj_text[:30]
-                    return f"{time_greeting} {user_name}-nga! Ungaloda '{short_p}' work eppadi pogudhu? Innaiki enna task seiyalam, sollunga! 💻✨"
+            prompt = (
+                "You are Seyal AI, an intelligent autonomous conversational computer-use assistant for Windows PC.\n"
+                f"User Name: {user_name}\n"
+                f"Current Time & Period: {now.strftime('%I:%M %p')}, {now.strftime('%A, %B %d, %Y')} ({time_period})\n"
+                f"User Context & Preferences:\n{context_block}\n\n"
+                "Task: Generate a single, warm, natural 1-2 sentence PROACTIVE conversational greeting.\n"
+                "Guidelines:\n"
+                "1. TIME AWARENESS: Be realistic about the current time! If it is late night (10 PM to 5 AM), do NOT ask if they want to build entire apps 'today' or say 'putting finishing touches today' unless acknowledging working late.\n"
+                "2. NO AWKWARD COMBINATIONS: Never mash up multiple unrelated memories into an awkward either/or question (e.g. 'All set for X or doing Y?'). If referencing an active project, naturally mention it and ask how to help on the PC.\n"
+                "3. COMPUTER-USE FOCUS: You are an autonomous computer-use agent. Always invite a task, command, or action to perform on their laptop/computer.\n"
+                "4. LANGUAGE MANDATE: " + (
+                    f"CRITICAL: User explicitly prefers TAMIL / TANGLISH (casual Tamil written in English alphabet). You MUST reply in natural, friendly Tanglish (e.g. 'Hey {user_name}! Naan ready. Laptop-la enna task seiyalam, sollunga!')! Do NOT speak pure English."
+                    if prefers_tamil else
+                    "Detect the preferred language from context/preferences and speak naturally in that tongue."
+                ) + "\n"
+                "5. Keep it concise (1 to 2 sentences max).\n"
+                "6. Output ONLY the raw greeting sentence. Do not include markdown, quotes, or conversational preamble."
+            )
 
-        # 3. Default Fresh Time-of-Day Personal Greeting (if no active milestones or projects)
-        return f"{time_greeting} {user_name}-nga! Nalla irukinga-la? Innaiki enna interesting-ana task seiyalam, sollunga! 😊✨"
+            res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.7,
+                ),
+                timeout=2.0,
+            )
+            greeting = (res.content or "").strip().replace('"', '')
+            if greeting and len(greeting) > 10:
+                return greeting
+        except Exception as llm_err:
+            log.warning("Dynamic LLM greeting generation notice: %s", llm_err)
+
+        # Universal Fallback (if LLM is temporarily unreachable)
+        if any("tamil" in str(p).lower() for p in preferences):
+            return f"Hey {user_name}! Naan ready. Innaiki laptop-la enna task seiyalam, sollunga! 😊✨"
+        return f"{time_greeting} {user_name}! I'm ready. What computer task shall we work on? 😊✨"
 
     async def _classify_intent(self, goal: str) -> str:
         """
-        Classify user message into 'CONVERSATION', 'CONVERSATION_GREETING', 'SYSTEM_WEATHER', 'SYSTEM_BATTERY', or 'TASK'.
+        Universal Multi-Lingual Intent Classifier (0ms safety stop + zero-shot fast LLM).
+        Unified into 3 core architectural decisions:
+        - CONTROL: urgent stop, cancel, halt, or pause commands.
+        - TASK: computer-use, OS operations, app launch/interaction, mouse/keyboard actions, file tasks.
+        - CHAT: conversations, explanations, questions, weather, system status, code, empathy.
         """
         lower_goal = goal.lower().strip()
         lower_clean = re.sub(r"[^\w\s]", "", lower_goal).strip()
 
-        # 1. Quick Emergency Stop
-        if lower_clean in ("stop", "cancel", "pause", "halt", "stop it", "niruthu"):
-            return "STOP"
+        # 1. Instant 0ms Emergency Stop Safety Guard
+        emergency_stops = {
+            "stop", "cancel", "pause", "halt", "stop it", "niruthu", "quit", "abort",
+            "freeze", "kill", "exit", "rok do", "band karo", "para", "detente", "arret"
+        }
+        if lower_clean in emergency_stops or any(lower_goal.startswith(s) for s in ("stop ", "cancel ")):
+            return "CONTROL"
 
-        # 2. Weather Triggers
-        weather_triggers = [
-            "weather", "climate", "rain", "temperature", "வானிலை", "வெதர்", "மழை", "mazhai",
-            "appadi erukku", "eppadi irukku", "epdi irukku", "how is the weather"
-        ]
-        if any(w in lower_clean for w in weather_triggers) and not any(
-            action_kw in lower_clean for action_kw in ["open", "click", "type", "run", "launch", "write", "delete", "create", "calc"]
-        ):
-            return "SYSTEM_WEATHER"
-
-        # 3. Battery / System Triggers
-        battery_triggers = ["battery", "charge", "percentage", "battery status", "charging", "battery level"]
-        if any(b in lower_clean for b in battery_triggers) and not any(
-            action_kw in lower_clean for action_kw in ["open", "click", "type", "run", "launch", "delete"]
-        ):
-            return "SYSTEM_BATTERY"
-
-        # 4. Obvious "No Task" / Casual chit-chat indicators (< 0.1ms)
-        no_task_triggers = [
-            "task athum illa", "task ethum illa", "task illa", "no task", "not a task",
-            "task onnum illa", "onnum illa", "ethuvum illa", "summa", "summa thaan",
-            "summa pesuren", "just chat", "just chatting", "just talking", "nothing",
-            "bore adikuthu", "bore"
-        ]
-        if any(nt in lower_clean for nt in no_task_triggers) and not any(
-            action_kw in lower_clean for action_kw in ["open", "click", "type", "run", "launch", "write", "delete", "create"]
-        ):
-            return "CONVERSATION"
-
-        # 5. Obvious Computer-Use Task Triggers (< 0.2ms)
-        task_action_prefixes = (
-            "open ", "launch ", "start ", "close ", "kill ", "click ", "double click ",
-            "right click ", "type ", "press ", "scroll ", "screenshot ", "take photo ",
-            "photo edu ", "screenshot edu ", "window-va moodu", "close pannu", "open pannu"
-        )
-        task_action_suffixes = (
-            "open pannu", "open panu", "open pannunga", "close pannu", "close panu",
-            "moodu", "play pannu", "type pannu", "click pannu", "delete pannu", "run pannu"
-        )
-        known_apps = (
-            "notepad", "calculator", "calc", "chrome", "google chrome", "edge",
-            "browser", "camera", "vscode", "vs code", "explorer", "spotify",
-            "paint", "terminal", "powershell", "cmd", "taskmgr", "task manager"
-        )
-        has_app = any(app in lower_clean for app in known_apps)
-        has_action = (
-            any(lower_clean.startswith(p) for p in task_action_prefixes)
-            or any(lower_clean.endswith(s) for s in task_action_suffixes)
-            or any(s in lower_clean for s in task_action_suffixes)
-        )
-        if has_app and has_action:
-            return "TASK"
-
-        # 6. Obvious Chatbot Q&A Triggers (< 0.2ms)
-        convo_triggers = (
-            "what is", "who is", "who are", "why is", "why does", "how does", "how to",
-            "explain", "tell me", "can you tell", "describe", "write a poem", "write a code",
-            "write python", "kavithai", "joke", "comedy", "kadhai", "story", "solren",
-            "enna solra", "meaning", "define", "translate", "advise", "advice"
-        )
-        if any(ct in lower_clean for ct in convo_triggers) and not (has_app and has_action):
-            return "CONVERSATION"
-
-        # 7. Fast Semantic Classification via ModelTier.FAST (< 200ms) for edge cases
+        # 2. Universal Fast LLM Intent Classifier
         try:
             await self._router.initialize()
-            classify_prompt = (
-                "You are an intent classification system for an AI companion on Windows.\n"
-                "Classify the following user input into either 'CONVERSATION' or 'TASK':\n"
-                "- 'CONVERSATION': The user is chatting, asking questions, seeking explanations, requesting code, math, jokes, advice, feelings, opinions, or general chit-chat. (NO direct desktop OS action required).\n"
-                "- 'TASK': The user wants the agent to directly operate the computer OS right now (e.g. open an application, click somewhere on screen, type text into an app, close a window, take a photo with camera, take a screenshot, manage files).\n\n"
-                f"User Input: \"{goal}\"\n\n"
-                "Output strictly ONE word: CONVERSATION or TASK"
+            intent_prompt = (
+                "You are an intent classification engine for a desktop AI assistant.\n"
+                "Classify the user input into exactly ONE category:\n\n"
+                "- CONTROL: user urgently commands the agent to stop, cancel, or halt execution.\n"
+                "- TASK: user asks to operate the computer, interact with applications, click, type, automate, take screenshots, open/close software, manage files, or perform actions on Windows.\n"
+                "- CHAT: user wants conversation, Q&A, explanations, weather, battery status, coding assistance, creative writing, general knowledge, empathy, or casual chat.\n\n"
+                f'User input: "{goal}"\n\n'
+                "Output strictly ONLY one word: [CONTROL, TASK, CHAT]. Nothing else."
             )
-            res = await self._router.generate(
-                messages=[LLMMessage(role="user", content=classify_prompt)],
-                tier=ModelTier.FAST,
-                temperature=0.0,
+            res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=intent_prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.0,
+                ),
+                timeout=1.5,
             )
-            raw = (res.content or "").strip().upper()
-            if "TASK" in raw:
+            raw_intent = (res.content or "").strip().upper()
+            if "CONTROL" in raw_intent or "STOP" in raw_intent:
+                return "CONTROL"
+            if "TASK" in raw_intent:
                 return "TASK"
-            return "CONVERSATION"
-        except Exception as e:
-            log.warning("Intent classification LLM notice: %s. Using heuristic.", e)
-            task_verbs = ["open", "launch", "close", "click", "type", "press", "scroll", "maximize", "minimize", "kill", "shut"]
-            if any(tv in lower_clean.split() for tv in task_verbs):
-                return "TASK"
-            return "CONVERSATION"
+            if "CHAT" in raw_intent or "CONVERSATION" in raw_intent:
+                return "CHAT"
+        except Exception as llm_err:
+            log.warning("Universal LLM intent classification notice: %s", llm_err)
 
-    def _analyze_chat_history_query(
-        self,
-        goal: str,
-        agent_titles: list[str],
-        simple_titles: list[str],
-    ) -> str | None:
-        """Analyze if user is querying for chat count, history, or specific chat names."""
-        goal_lower = goal.lower().strip()
-        chat_keywords = ["chat", "chats", "சேட்", "session", "sessions", "sidebar", "history"]
-        if not any(kw in goal_lower for kw in chat_keywords):
+        # 3. Fast Fallback Heuristic
+        task_action_words = {"open", "launch", "close", "kill", "click", "type", "screenshot", "camera", "calc", "calculator", "notepad", "chrome", "vscode", "explorer", "folder"}
+        words = set(re.findall(r"\w+", lower_clean))
+        if words.intersection(task_action_words):
+            return "TASK"
+
+        return "CHAT"
+
+    def _detect_simple_app_launch(self, goal: str) -> str | None:
+        """
+        Fast-Path: Detect if user goal is simply to open/launch an application.
+        Bypasses multi-second Vision LLM screenshot loop for direct sub-100ms OS execution.
+        """
+        lower = goal.lower().strip()
+        # Disallow compound tasks that require inner interactions
+        compound_words = {" and ", " then ", " type ", " click ", " photo ", " picture ", " write ", " search ", " close ", " delete ", " terminate ", " kill "}
+        if any(cw in f" {lower} " for cw in compound_words):
             return None
 
-        query_intent_keywords = [
-            "ethana", "athana", "ethanai", "athanai", "எத்தனை", "how many", "count",
-            "total", "list", "show", "irukku", "erukku", "இருக்", "solren", "sollu"
-        ]
-        if not any(q in goal_lower for q in query_intent_keywords):
+        # Check launch keywords (English, Tanglish, Tamil, Hindi)
+        launch_triggers = ("open", "launch", "start", "run", "open pannu", "open pannunga", "thira", "khol", "chalu")
+        has_launch_intent = any(t in lower for t in launch_triggers)
+        if not has_launch_intent:
             return None
 
-        target_filter = None
-        quoted_match = re.search(r'["\']([^"\']+)["\']', goal)
-        cand_stop = {
-            "all", "motha", "total", "intha", "antha", "oru", "the", "my", "enga", "unga",
-            "ethana", "athana", "ethanai", "athanai", "how", "many", "recent", "new", "old",
-            "side", "sidebar", "sila", "some", "nalla", "enna", "irukura", "erukura", "la"
+        known_apps = {
+            "notepad": "notepad",
+            "calc": "calc",
+            "calculator": "calc",
+            "chrome": "chrome",
+            "google chrome": "chrome",
+            "edge": "edge",
+            "microsoft edge": "edge",
+            "browser": "edge",
+            "vs code": "vscode",
+            "vscode": "vscode",
+            "code": "vscode",
+            "terminal": "terminal",
+            "powershell": "powershell",
+            "cmd": "cmd",
+            "command prompt": "cmd",
+            "task manager": "task manager",
+            "taskmgr": "task manager",
+            "camera": "camera",
+            "paint": "paint",
+            "explorer": "explorer",
+            "file explorer": "explorer",
+            "files": "explorer",
+            "settings": "settings",
         }
+        for app_alias, canonical_name in sorted(known_apps.items(), key=lambda x: len(x[0]), reverse=True):
+            if app_alias in lower:
+                return canonical_name
+        return None
 
-        if quoted_match:
-            target_filter = quoted_match.group(1).strip()
-        else:
-            name_match = re.search(
-                r'(\b[\w\u0B80-\u0BFF\-]+)\s+(?:name(?:\s*la|-la)?|title(?:\s*la|-la)?|nu|endru|endra|peyiril)\b',
-                goal,
-                re.IGNORECASE,
-            )
-            if name_match:
-                cand = name_match.group(1).strip()
-                if cand.lower() not in cand_stop:
-                    target_filter = cand
-            else:
-                chat_kw_match = re.search(
-                    r'(\b[\w\u0B80-\u0BFF\-]+)\s+(?:chats?|சேட்)\b',
-                    goal,
-                    re.IGNORECASE,
-                )
-                if chat_kw_match:
-                    cand = chat_kw_match.group(1).strip()
-                    if cand.lower() not in cand_stop:
-                        target_filter = cand
-
-        if target_filter:
-            tf_lower = target_filter.lower()
-            matching_agent = [t for t in agent_titles if tf_lower in t.lower()]
-            matching_simple = [t for t in simple_titles if tf_lower in t.lower()]
-
-            return (
-                f"[DETERMINISTIC VERIFIED CHAT QUERY RESULT FOR USER QUESTION]:\n"
-                f"- User Query Target Name: '{target_filter}'\n"
-                f"- CRITICAL NOTE: '{target_filter}' in the user query is a TITLE SEARCH FILTER, NOT a greeting to the assistant!\n"
-                f"- In Current Active Sidebar (Conversational Computer-Use Agent):\n"
-                f"  * Total matching chats: {len(matching_agent)}\n"
-                f"  * Matching titles: {json.dumps(matching_agent, ensure_ascii=False)}\n"
-                f"- In Alternate Sidebar (Simple Chatbot):\n"
-                f"  * Total matching chats: {len(matching_simple)}\n"
-                f"  * Matching titles: {json.dumps(matching_simple, ensure_ascii=False)}\n\n"
-                f"STRICT RESPONSE INSTRUCTIONS:\n"
-                f"1. Clearly state the exact count of chats matching '{target_filter}' in the active Conversational Computer-Use Agent sidebar ({len(matching_agent)} chats).\n"
-                f"2. Also mention how many match in the Simple Chatbot sidebar ({len(matching_simple)} chats) so the user gets complete clarity across both modes.\n"
-                f"3. List the matching chat names.\n"
-                f"4. NEVER fabricate numbers or invent random topics (like 'pal pal'). Use ONLY the exact numbers and titles provided above."
-            )
-        else:
-            return (
-                f"[DETERMINISTIC VERIFIED CHAT QUERY RESULT FOR USER QUESTION]:\n"
-                f"- Current Active Sidebar (Conversational Computer-Use Agent) Total: {len(agent_titles)} chats\n"
-                f"- Alternate Sidebar (Simple Chatbot) Total: {len(simple_titles)} chats\n"
-                f"- Recent Active Sidebar Titles: {json.dumps(agent_titles[:15], ensure_ascii=False)}\n\n"
-                f"STRICT RESPONSE INSTRUCTIONS:\n"
-                f"1. State that the active Conversational Computer-Use Agent sidebar currently has exactly {len(agent_titles)} chats.\n"
-                f"2. Mention that the Simple Chatbot sidebar has {len(simple_titles)} chats.\n"
-                f"3. Do NOT approximate with vague numbers (like '30-ku mela') or fabricate chat topics. State the exact numbers directly."
-            )
-
-    async def _handle_conversational_query(self, goal: str) -> dict[str, Any]:
-        """Process conversational chit-chat, Q&A, and discussion using the Full Chatbot Engine."""
-        self._status = AgentStatus.THINKING
-        await self._router.initialize()
-
-        # Build dynamic system prompt including recent saved sessions from sidebar if available
-        system_content = CHATBOT_SYSTEM_PROMPT
-        query_fact: str | None = None
+    async def _build_conversational_telemetry_prompt(self) -> str:
+        """
+        Build verified local desktop telemetry (sidebar chats + installed apps) for conversational queries.
+        Universal Multilingual Design: No regex or keyword parsing. Gives the LLM verified ground truth so
+        it can accurately answer questions in ANY language (English, Tamil, Tanglish, Hindi, Spanish, etc.).
+        """
+        blocks = []
         try:
             from nexus.database.engine import get_session
             from nexus.database.repositories.conversation import ConversationRepository
@@ -673,20 +704,97 @@ class ConversationalComputerUseAgent:
                     agent_titles = [c.summary.replace("[Computer-Use]", "").strip() for c in agent_convs if c.summary]
                     simple_titles = [c.summary.strip() for c in simple_convs if c.summary]
 
-                    query_fact = self._analyze_chat_history_query(goal, agent_titles, simple_titles)
-
-                    session_info = (
-                        f"\n\nCURRENT SAVED SESSIONS IN USER'S NEXUS SIDEBAR:\n"
-                        f"- Active Mode: Conversational Computer-Use Agent ({len(agent_titles)} total chats)\n"
-                        f"  Recent titles: {json.dumps(agent_titles[:25], ensure_ascii=False)}\n"
-                        f"- Other Mode: Simple Chatbot ({len(simple_titles)} total chats)\n"
-                        f"  Recent titles: {json.dumps(simple_titles[:15], ensure_ascii=False)}"
+                    blocks.append(
+                        f"SAVED SESSIONS IN USER'S SIDEBAR:\n"
+                        f"- Active Mode (Conversational Computer-Use Agent): {len(agent_titles)} total chats.\n"
+                        f"  Recent titles: {json.dumps(agent_titles[:35], ensure_ascii=False)}\n"
+                        f"- Secondary Mode (Simple Chatbot): {len(simple_titles)} total chats.\n"
+                        f"  Recent titles: {json.dumps(simple_titles[:20], ensure_ascii=False)}"
                     )
-                    if query_fact:
-                        session_info += f"\n\n{query_fact}"
-                    system_content += session_info
         except Exception as db_err:
             log.debug("Session list retrieval notice: %s", db_err)
+
+        try:
+            from nexus.services.awareness import get_awareness_service
+            awareness = get_awareness_service().get_cached_awareness()
+            installed = awareness.get("installed_apps", [])
+            if installed:
+                app_names = [a.get("name") for a in installed if a.get("name")]
+                blocks.append(
+                    f"INSTALLED SOFTWARE ON USER'S LAPTOP:\n"
+                    f"- Total Installed Applications: {len(installed)}\n"
+                    f"- Application Names: {json.dumps(app_names[:60], ensure_ascii=False)}"
+                )
+        except Exception as aware_err:
+            log.debug("Awareness telemetry notice: %s", aware_err)
+
+        try:
+            from nexus.memory.manager import MemoryManager
+            mem_mgr = MemoryManager()
+            mem_items = []
+            all_recs = await asyncio.wait_for(mem_mgr.storage.search(limit=25), timeout=0.8)
+            for rec in all_recs:
+                val = rec.value if isinstance(rec.value, dict) else {"text": str(rec.value)}
+                t = val.get("text", str(rec.value))
+                if not t:
+                    continue
+                if val.get("event_date"):
+                    mem_items.append(f"- Event: {t} (Target Date: {val.get('event_date')})")
+                elif "project" in rec.tags or rec.category.value == "current_task" or "project" in rec.key:
+                    mem_items.append(f"- Ongoing Project: {t}")
+                elif "preference" in rec.tags or rec.category.value in ("user_preference", "app_preference") or "pref" in rec.key:
+                    mem_items.append(f"- Preference: {t}")
+                else:
+                    mem_items.append(f"- Note/Fact: {t}")
+            if mem_items:
+                blocks.append(
+                    "USER PROFILE & MEMORY CONTEXT:\n" + "\n".join(mem_items[:15])
+                )
+        except Exception as mem_err:
+            log.debug("Memory telemetry notice: %s", mem_err)
+
+        if blocks:
+            return (
+                "\n\nVERIFIED SYSTEM & SIDEBAR TELEMETRY FACTS:\n"
+                + "\n\n".join(blocks)
+                + "\n\nCRITICAL INSTRUCTIONS FOR SYSTEM TELEMETRY:\n"
+                "- When user asks about saved chats, search filters, chat count, or installed software in ANY language:\n"
+                "  * Answer strictly using the verified facts above.\n"
+                "  * Never fabricate numbers or invent imaginary software.\n"
+                "  * Answer naturally and fluently in the user's language."
+            )
+        return ""
+
+    async def _build_user_language_prompt(self) -> str:
+        """Fetch user profile language preferences and build strict language guardrail."""
+        try:
+            from sqlalchemy import select
+            from nexus.database.engine import get_session
+            from nexus.database.models import User
+            from nexus.llm.prompts.language_guardrail import build_language_guardrail_prompt
+
+            async with get_session() as session:
+                stmt = select(User).order_by(User.created_at.desc()).limit(1)
+                res = await session.execute(stmt)
+                user = res.scalar_one_or_none()
+                if user and (user.mother_tongue or user.known_languages):
+                    return build_language_guardrail_prompt(
+                        mother_tongue=user.mother_tongue,
+                        known_languages=user.known_languages,
+                    )
+        except Exception as err:
+            log.debug("User language prompt lookup notice: %s", err)
+
+        from nexus.llm.prompts.language_guardrail import build_language_guardrail_prompt
+        return build_language_guardrail_prompt()
+
+    async def _handle_conversational_query(self, goal: str) -> dict[str, Any]:
+        """Process conversational chit-chat, Q&A, and discussion using the Full Chatbot Engine."""
+        self._status = AgentStatus.THINKING
+        await self._router.initialize()
+
+        lang_prompt = await self._build_user_language_prompt()
+        system_content = CHATBOT_SYSTEM_PROMPT + lang_prompt + await self._build_conversational_telemetry_prompt()
 
         messages = [LLMMessage(role="system", content=system_content)]
         for msg in self._convo_history[-10:]:
@@ -694,19 +802,18 @@ class ConversationalComputerUseAgent:
         messages.append(LLMMessage(role="user", content=goal))
 
         try:
-            generation_temp = 0.15 if query_fact else 0.7
             resp = await self._router.generate(
                 messages=messages,
                 tier=ModelTier.FAST,
-                temperature=generation_temp,
+                temperature=0.7,
             )
             reply_text = (resp.content or "").strip()
         except Exception as e:
             log.warning("Chatbot generation notice: %s", e)
-            reply_text = "Romba interesting-ana vishayam-nga! Enna task seiyattum sollunga! 😊✨"
+            reply_text = UNIVERSAL_CONVO_FALLBACK
 
         if not reply_text:
-            reply_text = "Sollunga! Enna help pannattum? 😊✨"
+            reply_text = UNIVERSAL_CONVO_FALLBACK
 
         # Update persistent conversational working memory
         self._convo_history.append({"role": "user", "content": goal})
@@ -730,72 +837,130 @@ class ConversationalComputerUseAgent:
             "history": [],
         }
 
-    async def _extract_weather_location(self, goal: str) -> str | None:
-        """Extract and standardize city/town name from weather query dynamically without hardcoded city defaults."""
-        candidate: str | None = None
-        # Heuristic regex:
-        m = re.search(r"\b([a-zA-Z\u0B80-\u0BFF]{3,})\b\s*(?:-|\s)?(?:la|le|il|ula|lo)\s+(?:weather|climate|rain|mazhai|வெதர்|வானிலை)", goal, re.IGNORECASE)
-        if m:
-            candidate = m.group(1).strip()
-        else:
-            m2 = re.search(r"(?:weather|climate|rain|mazhai)\s+(?:in|at|for|of)\s+([a-zA-Z\u0B80-\u0BFF\s]{3,})", goal, re.IGNORECASE)
-            if m2:
-                candidate = re.sub(r"\b(today|now|tomorrow|appadi|eppadi|irukku|erukku|please|nga)\b.*", "", m2.group(1), flags=re.IGNORECASE).strip()
+    async def stream_conversational_query(self, goal: str):
+        """Stream conversational response token-by-token directly from Gemini."""
+        self._status = AgentStatus.THINKING
+        await self._router.initialize()
 
-        # Fast LLM normalization (normalizes typos/Tanglish e.g. "truttani" -> "Tiruttani", "kovai" -> "Coimbatore", detects "NONE")
+        lang_prompt = await self._build_user_language_prompt()
+        system_content = CHATBOT_SYSTEM_PROMPT + lang_prompt + await self._build_conversational_telemetry_prompt()
+
+        messages = [LLMMessage(role="system", content=system_content)]
+        for msg in self._convo_history[-10:]:
+            messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
+        messages.append(LLMMessage(role="user", content=goal))
+
+        full_reply = []
+        try:
+            async for chunk in self._router.generate_stream(
+                messages=messages,
+                tier=ModelTier.FAST,
+                temperature=0.7,
+            ):
+                full_reply.append(chunk)
+                yield chunk
+        except Exception as e:
+            log.warning("Stream generation notice: %s", e)
+            full_reply.append(UNIVERSAL_CONVO_FALLBACK)
+            yield UNIVERSAL_CONVO_FALLBACK
+
+        reply_text = "".join(full_reply).strip() or UNIVERSAL_CONVO_FALLBACK
+
+        self._convo_history.append({"role": "user", "content": goal})
+        self._convo_history.append({"role": "assistant", "content": reply_text})
+        if len(self._convo_history) > 20:
+            self._convo_history = self._convo_history[-20:]
+
+        self._status = AgentStatus.IDLE
+        self._is_task_running = False
+        await self._event_bus.emit(
+            "computer_use.finished",
+            {"goal": goal, "narration": reply_text, "step": 0},
+        )
+
+    async def _extract_weather_details(self, goal: str) -> tuple[str | None, str]:
+        """
+        Extract city/town name and target timeframe dynamically via LLM across ANY language.
+        Zero hardcoded regexes or language keywords.
+        """
         try:
             await self._router.initialize()
             prompt = (
-                "Extract and standardize the city/town/location name from the user weather query.\n"
-                f'User query: "{goal}"\n'
-                "Rules:\n"
-                "- If a city/town/location is mentioned (even with colloquial spelling, e.g. 'truttani' -> 'Tiruttani', 'kovai' -> 'Coimbatore', 'chennai' -> 'Chennai'), output ONLY the standardized official English city name.\n"
-                "- If NO city or location is mentioned in the query at all (e.g. 'weather appadi erukku?'), output strictly 'NONE'.\n"
-                "Output ONLY the location name or NONE, nothing else."
+                f"Analyze this user weather query: \"{goal}\".\n"
+                "Extract two fields separated by a vertical bar (|):\n"
+                "1. Official standardized English city/town name (or NONE if no location is mentioned).\n"
+                "2. Target timeframe: either 'tomorrow' if asking about future/tomorrow, or 'current'.\n\n"
+                "Example format: Tokyo | current\n"
+                "Example format: Chennai | tomorrow\n"
+                "Example format: NONE | current\n\n"
+                "Output strictly ONLY in the format 'LOCATION | TIMEFRAME', nothing else."
             )
-            res = await self._router.generate(
-                messages=[LLMMessage(role="user", content=prompt)],
-                tier=ModelTier.FAST,
-                temperature=0.0,
+            res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.0,
+                ),
+                timeout=1.8,
             )
-            val = (res.content or "").strip().replace("'", "").replace('"', "")
-            if val and val.upper() != "NONE" and len(val) < 40:
-                return val
+            val = (res.content or "").strip()
+            if "|" in val:
+                loc_part, time_part = val.split("|", 1)
+                loc = loc_part.strip().replace("'", "").replace('"', "")
+                target_day = "tomorrow" if "tomorrow" in time_part.lower() else "current"
+                return (None if loc.upper() == "NONE" or len(loc) > 50 else loc, target_day)
         except Exception as e:
-            log.warning("Location extraction via LLM notice: %s", e)
-            if candidate and len(candidate) < 30:
-                return candidate.title()
+            log.warning("Weather detail extraction notice: %s", e)
 
-        return candidate.title() if (candidate and len(candidate) < 30) else None
+        return (None, "current")
 
     async def _handle_weather_query(self, goal: str) -> dict[str, Any]:
-        """Fetch live weather or forecast dynamically for any city/town without defaulting to Chennai."""
-        target_city = await self._extract_weather_location(goal)
-        lower_clean = goal.lower()
-        is_tomorrow = any(
-            w in lower_clean
-            for w in ["tomorrow", "naalaiki", "naalaiku", "nalaiku", "naalai", "repu"]
-        )
+        """Fetch live weather or forecast dynamically for any city/town and synthesize voice reply in user's language."""
+        target_city, target_day = await self._extract_weather_details(goal)
 
+        weather_summary = ""
         if not target_city:
-            narration = "Endha ooru-ku (city-ku) weather paakanum-nga? (e.g. Tiruttani, Avadi, Chennai, Coimbatore) Sollunga, paathu solren! 🌦️"
+            target_city = "your area"
+            weather_summary = "Location not specified by user."
         else:
             try:
                 from nexus.tools.system.basic import GetWeatherTool
                 weather_tool = GetWeatherTool()
-                target_day = "tomorrow" if is_tomorrow else "current"
                 w_res = await weather_tool.execute(location=target_city, target_day=target_day)
                 if hasattr(w_res, "success") and not w_res.success:
-                    narration = f"Mannikavum, {target_city}-ku weather details edukka mudiyala-nga. Ooru name correct-ah nu check pannunga! 🌦️"
+                    weather_summary = f"Weather lookup failed: {w_res.error if hasattr(w_res, 'error') else 'service unavailable'}"
                 else:
                     weather_summary = w_res.output if hasattr(w_res, "output") else str(w_res)
-                    if is_tomorrow:
-                        narration = f"{target_city}-la naalaiki (tomorrow) weather: {weather_summary} ⛅ Next enna pannattum, sollunga! ✨"
-                    else:
-                        narration = f"{target_city}-la ippo weather: {weather_summary} 🌦️ Next enna pannattum, sollunga! ✨"
             except Exception as w_err:
                 log.warning("Weather lookup notice for %s: %s", target_city, w_err)
-                narration = f"Mannikavum, {target_city}-ku weather details edukka mudiyala-nga. Ooru name correct-ah nu check pannunga! 🌦️"
+                weather_summary = f"Weather service error: {w_err}"
+
+        # Dynamically synthesize spoken voice reply in user's exact language & dialect
+        try:
+            await self._router.initialize()
+            synth_prompt = (
+                "You are an articulate, warm AI companion on Windows.\n"
+                f"User asked: \"{goal}\"\n"
+                f"Live Weather Data for {target_city}: {weather_summary}\n\n"
+                "INSTRUCTIONS:\n"
+                "- Synthesize a 1-2 sentence spoken reply providing this weather information.\n"
+                "- If location was not specified, politely ask which city or location they would like the weather for.\n"
+                "- Respond in the EXACT SAME LANGUAGE and style the user asked in (English, Tamil, Tanglish, Hindi, Spanish, French, German, etc.).\n"
+                "- Keep it natural, concise for text-to-speech, and warmly invite the next action or question.\n"
+                "Output strictly ONLY the spoken sentence."
+            )
+            synth_res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=synth_prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.4,
+                ),
+                timeout=2.0,
+            )
+            narration = (synth_res.content or "").strip().replace('"', '')
+        except Exception as synth_err:
+            log.warning("Dynamic weather voice synthesis notice: %s", synth_err)
+            narration = f"The weather in {target_city} is {weather_summary}."
 
         self._convo_history.append({"role": "user", "content": goal})
         self._convo_history.append({"role": "assistant", "content": narration})
@@ -817,18 +982,46 @@ class ConversationalComputerUseAgent:
         }
 
     async def _handle_battery_query(self, goal: str) -> dict[str, Any]:
-        """Fetch system battery status and respond conversationally."""
+        """Fetch system battery status and respond conversationally in user's language."""
+        battery_info = ""
         try:
             import psutil
             battery = psutil.sensors_battery()
             if battery:
-                plugged = "charger connected-la irukku" if battery.power_plugged else "battery mode-la run aagudhu"
-                narration = f"Ungaloda laptop battery ippo {round(battery.percent)}%-la irukku-nga! ({plugged}) 🔋✨ Next enna seiyattum, sollunga!"
+                plugged = "charger connected" if battery.power_plugged else "running on battery"
+                percent = round(battery.percent)
+                battery_info = f"Battery is at {percent}%, {plugged}."
             else:
-                narration = "Laptop battery status details ippo retrieve panna mudiyala-nga! Desktop PC-la run aagudha nu check pannunga. 😊✨"
+                battery_info = "Battery sensor is not accessible or device is a desktop PC."
         except Exception as b_err:
             log.warning("Battery status notice: %s", b_err)
-            narration = "Battery status check panna mudiyala-nga. Vera enna help seiyattum sollunga! 😊"
+            battery_info = "Unable to retrieve battery status."
+
+        # Dynamically synthesize spoken voice reply in user's exact language & dialect
+        try:
+            await self._router.initialize()
+            synth_prompt = (
+                "You are an articulate AI desktop companion.\n"
+                f"User asked: \"{goal}\"\n"
+                f"System Battery Data: {battery_info}\n\n"
+                "INSTRUCTIONS:\n"
+                "- Synthesize a friendly 1-sentence spoken reply informing the user about their battery status.\n"
+                "- Respond in the EXACT SAME LANGUAGE and style the user asked in (English if English, Tamil/Tanglish if Tamil, Hindi if Hindi, etc.).\n"
+                "- Keep it brief, natural, and clear for voice text-to-speech.\n"
+                "Output strictly ONLY the spoken sentence."
+            )
+            synth_res = await asyncio.wait_for(
+                self._router.generate(
+                    messages=[LLMMessage(role="user", content=synth_prompt)],
+                    tier=ModelTier.FAST,
+                    temperature=0.4,
+                ),
+                timeout=2.0,
+            )
+            narration = (synth_res.content or "").strip().replace('"', '')
+        except Exception as synth_err:
+            log.warning("Dynamic battery voice synthesis notice: %s", synth_err)
+            narration = f"Your laptop battery status: {battery_info}."
 
         self._convo_history.append({"role": "user", "content": goal})
         self._convo_history.append({"role": "assistant", "content": narration})
@@ -866,12 +1059,12 @@ class ConversationalComputerUseAgent:
         intent = await self._classify_intent(goal)
         log.info("Classified goal intent: '%s' for input: '%s'", intent, goal)
 
-        if intent == "STOP":
+        if intent in ("CONTROL", "STOP"):
             self._status = AgentStatus.STOPPED
             self._is_task_running = False
-            return {"status": "stopped", "intent": "STOP", "is_task": False, "reason": "User requested stop", "steps_executed": 0}
+            return {"status": "stopped", "intent": "CONTROL", "is_task": False, "reason": "User requested stop", "steps_executed": 0}
 
-        if intent in ("CONVERSATION", "CONVERSATION_GREETING"):
+        if intent in ("CHAT", "CONVERSATION", "CONVERSATION_GREETING"):
             return await self._handle_conversational_query(goal)
 
         if intent == "SYSTEM_WEATHER":
@@ -879,6 +1072,75 @@ class ConversationalComputerUseAgent:
 
         if intent == "SYSTEM_BATTERY":
             return await self._handle_battery_query(goal)
+
+        # Fast-Path: Direct OS App Launcher (< 200ms without Vision LLM round-trip)
+        fast_app = self._detect_simple_app_launch(goal)
+        if fast_app:
+            log.info("Fast-Path: Direct OS launch for app '%s'", fast_app)
+            self._is_task_running = True
+            self._status = AgentStatus.ACTING
+            start_t = time.perf_counter()
+            action_res = await self._executor.execute(
+                ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app)
+            )
+            elapsed = time.perf_counter() - start_t
+            self._history.append(
+                StepRecord(
+                    step_number=1,
+                    observation=ScreenObservation(active_window=fast_app),
+                    thought=f"Fast-path direct application launch: {fast_app}",
+                    action=ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app),
+                    action_result=action_res,
+                    success=action_res.get("success", True),
+                    elapsed_seconds=elapsed,
+                )
+            )
+            self._status = AgentStatus.IDLE
+            self._is_task_running = False
+
+            # Synthesize natural spoken confirmation in user's language
+            try:
+                synth_res = await self._router.generate(
+                    messages=[
+                        LLMMessage(
+                            role="user",
+                            content=(
+                                f"User instruction: \"{goal}\"\n"
+                                f"Action performed: Successfully launched {fast_app.title()}.\n"
+                                "Synthesize a 1-sentence enthusiastic, natural spoken confirmation in the user's exact language and dialect (e.g. English, Tamil, Tanglish, etc.), warmly asking what to do next.\n"
+                                "Output strictly ONLY the spoken sentence."
+                            ),
+                        )
+                    ],
+                    tier=ModelTier.FAST,
+                    temperature=0.3,
+                )
+                fast_narr = (synth_res.content or "").strip().replace('"', '')
+            except Exception:
+                fast_narr = f"Opened {fast_app.title()} for you! What would you like to do next?"
+
+            await self._event_bus.emit(
+                "computer_use.finished",
+                {"goal": goal, "narration": fast_narr, "step": 1},
+            )
+            return {
+                "status": "completed",
+                "intent": "TASK",
+                "is_task": True,
+                "goal": goal,
+                "narration": fast_narr,
+                "steps_executed": 1,
+                "history": [
+                    {
+                        "step": 1,
+                        "thought": f"Fast-path launched {fast_app}",
+                        "action": "open_app",
+                        "coordinates": (None, None),
+                        "success": True,
+                        "elapsed_seconds": elapsed,
+                    }
+                ],
+            }
 
         # 2. TASK INTENT: Computer-Use Execution Engine
         self._is_task_running = True
@@ -888,9 +1150,8 @@ class ConversationalComputerUseAgent:
             {"goal": goal, "max_steps": self._max_steps},
         )
 
-        # Emit immediate verbal acknowledgment so user hears voice confirmation in < 800ms
-        clean_name = goal[:35].strip()
-        ack_narration = f"Kandippa-nga, ippo {clean_name} task-ah start panren! 🚀"
+        # Emit immediate verbal acknowledgment matching user language dynamically in < 800ms
+        ack_narration = await generate_task_acknowledgment(goal, self._router)
         await self._event_bus.emit(
             "computer_use.narrate",
             {"narration": ack_narration, "step": 0},
@@ -899,23 +1160,7 @@ class ConversationalComputerUseAgent:
         step_num = 0
         final_result: dict[str, Any] = {"status": "completed", "intent": "TASK", "is_task": True, "goal": goal, "steps_executed": 0}
         opened_external_apps: list[str] = []
-
-        # Check if user explicitly requested to keep external windows open
-        lower_goal = goal.lower()
-        explicit_keep_open = any(
-            kw in lower_goal
-            for kw in [
-                "don't close",
-                "dont close",
-                "close pannatha",
-                "close panatha",
-                "keep open",
-                "keep it open",
-                "open laye",
-                "moodatha",
-                "do not close",
-            ]
-        )
+        lower_goal = goal.lower().strip()
 
         try:
             while step_num < self._max_steps:
@@ -982,24 +1227,59 @@ class ConversationalComputerUseAgent:
 
                 # Strict User Permission Guard: NEVER close applications unless user explicitly requested 'close'
                 if action_type == ActionType.WINDOW_CLOSE:
-                    user_asked_close = any(kw in lower_goal for kw in ["close", "moodu", "exit", "quit", "மூடு", "கிளோஸ்"])
-                    if not user_asked_close:
+                    should_close = False
+                    try:
+                        verify_res = await self._router.generate(
+                            messages=[LLMMessage(role="user", content=f"Did the user explicitly instruct to close, exit, or terminate an application in this request: \"{goal}\"? Answer strictly YES or NO.")],
+                            tier=ModelTier.FAST,
+                            temperature=0.0,
+                        )
+                        should_close = "YES" in (verify_res.content or "").upper()
+                    except Exception:
+                        should_close = any(w in lower_goal for w in ("close", "exit", "quit", "terminate", "kill", "shut"))
+
+                    if not should_close:
                         log.info("Blocked unauthorized WINDOW_CLOSE action; keeping application open.")
                         action_type = ActionType.FINISH
-                        if not any(q in (narration or "").lower() for q in ["next", "என்ன", "enna", "what next", "pannattum"]):
-                            narration = f"{narration} Next என்ன பண்ணட்டும்? ✨" if narration else "Task complete panniten-pa! Next என்ன பண்ணட்டும்? ✨"
+
+                # Check Dynamic Computer Control Permissions from Settings
+                try:
+                    from nexus.security.permissions import PermissionScope, PermissionScopeManager
+                    perm_mgr = PermissionScopeManager()
+
+                    if action_type in [
+                        ActionType.CLICK, ActionType.DOUBLE_CLICK, ActionType.RIGHT_CLICK,
+                        ActionType.MIDDLE_CLICK, ActionType.MOUSE_MOVE, ActionType.MOUSE_DRAG, ActionType.MOUSE_SCROLL
+                    ]:
+                        if not perm_mgr.is_scope_granted(PermissionScope.MOUSE_CONTROL):
+                            log.warning("Mouse action blocked: MOUSE_CONTROL permission is disabled in Settings.")
+                            action_type = ActionType.FINISH
+                            narration = "Mouse Control permission is disabled in Settings > Computer Control. Please enable it to allow mouse actions! 🔒"
+
+                    elif action_type in [ActionType.TYPE_TEXT, ActionType.KEY_PRESS, ActionType.HOTKEY, ActionType.CLIPBOARD_PASTE]:
+                        if not perm_mgr.is_scope_granted(PermissionScope.KEYBOARD_CONTROL):
+                            log.warning("Keyboard action blocked: KEYBOARD_CONTROL permission is disabled in Settings.")
+                            action_type = ActionType.FINISH
+                            narration = "Keyboard Control permission is disabled in Settings > Computer Control. Please enable it to allow typing! 🔒"
+
+                    elif action_type in [ActionType.OPEN_APP, ActionType.WINDOW_CLOSE]:
+                        if not perm_mgr.is_scope_granted(PermissionScope.APP_CONTROL):
+                            log.warning("App action blocked: APP_CONTROL permission is disabled in Settings.")
+                            action_type = ActionType.FINISH
+                            narration = "Applications Control permission is disabled in Settings > Computer Control. Please enable it to launch/close apps! 🔒"
+                except Exception as perm_err:
+                    log.debug("Permission check notice: %s", perm_err)
 
                 # Loop and cycle protection
                 is_loop, loop_reason = self._detect_loop(comp_action)
                 if is_loop and action_type != ActionType.FINISH:
                     log.warning("Cycle/Loop prevented: %s. Auto-completing task.", loop_reason)
                     action_type = ActionType.FINISH
-                    narration = narration or "Task completed successfully! Next என்ன பண்ணட்டும்? 🎉"
 
                 # Check for completion
                 if action_type == ActionType.FINISH:
                     # Guard for camera photo task: if user asked for a photo and no shutter was fired yet, auto-trigger space shutter!
-                    if "camera" in lower_goal and any(kw in lower_goal for kw in ["pic", "photo", "adu", "edu", "picture", "snap", "take"]):
+                    if "camera" in lower_goal and any(kw in lower_goal for kw in ["pic", "photo", "picture", "snap", "take", "capture"]):
                         photo_taken = any(
                             (r.action.action_type == ActionType.KEY_PRESS and r.action.key in ("space", "enter"))
                             or (r.action.action_type == ActionType.CLICK and "shutter" in (r.thought or "").lower())
@@ -1008,7 +1288,7 @@ class ConversationalComputerUseAgent:
                         if not photo_taken:
                             log.info("Camera photo task guard: photo not taken yet. Auto-triggering Spacebar shutter.")
                             comp_action = ComputerAction(action_type=ActionType.KEY_PRESS, key="space", reasoning="Press Spacebar to capture photo in Windows Camera")
-                            narration = "Camera-la photo capture panniten-pa! 📸"
+                            narration = "Photo captured with Camera! 📸"
                             action_res = await self._executor.execute(comp_action)
                             self._history.append(StepRecord(
                                 step_number=step_num,
@@ -1019,9 +1299,6 @@ class ConversationalComputerUseAgent:
                                 success=True,
                                 elapsed_seconds=0.1,
                             ))
-
-                    if narration and not any(q in narration.lower() for q in ["next", "என்ன", "enna", "what next", "pannattum"]):
-                        narration = f"{narration} Next என்ன பண்ணட்டும்? ✨"
 
                     self._status = AgentStatus.COMPLETED
                     await self._event_bus.emit(
@@ -1142,24 +1419,18 @@ class ConversationalComputerUseAgent:
         # Task guideline hint
         lower_goal = goal.lower().strip()
         task_category_hint = (
-            "STRICT ACTION RULE: NEVER automatically close any application unless the user EXPLICITLY instructed 'close' in their goal. "
+            "STRICT ACTION RULE: NEVER automatically close any application unless the user EXPLICITLY instructed to close it in their goal. "
             "Never close background apps (like Google Chrome, VS Code, or Nexus). "
-            "When completing any goal, keep apps open and enthusiastically ask 'Next enna pannattum?'"
+            "When completing any goal, keep apps open and enthusiastically ask what to do next in the user's language."
         )
 
-        if "camera" in lower_goal and any(kw in lower_goal for kw in ["pic", "photo", "adu", "edu", "picture", "snap", "take"]):
+        if "camera" in lower_goal:
             task_category_hint += (
                 "\n📸 CAMERA COMPOUND TASK MANDATE:\n"
-                "- The user requested to OPEN CAMERA and TAKE A PHOTO ('pic adu' / 'photo edu' = take a photo in Tamil/Tanglish)!\n"
+                "- If the user requested to open camera and capture a photo/picture:\n"
                 "- If Camera app is in the background or not focused: Focus it using switch_window or focus_window.\n"
                 "- If Camera app is open on screen: Take the photo by clicking the Camera shutter button OR using key_press 'space' or 'enter'!\n"
-                "- DO NOT output 'finish' after merely opening the camera. You MUST take the photo first!"
-            )
-        elif any(kw in lower_goal for kw in ["panni", "pannitu", "and then", "and"]):
-            task_category_hint += (
-                "\n⚠️ COMPOUND GOAL MANDATE:\n"
-                "- The user has given a multi-step task ('... panni ...').\n"
-                "- Complete ALL requested steps before finishing. Never finish after only opening an app when a follow-up action was requested!"
+                "- DO NOT output 'finish' after merely opening the camera if capturing a photo was part of the goal. You MUST take the photo first!"
             )
 
         prompt = (
@@ -1192,8 +1463,9 @@ class ConversationalComputerUseAgent:
             except Exception as e:
                 log.debug("Could not read screenshot image: %s", e)
 
+        lang_prompt = await self._build_user_language_prompt()
         messages = [
-            LLMMessage(role="system", content=COMPUTER_USE_SYSTEM_PROMPT),
+            LLMMessage(role="system", content=COMPUTER_USE_SYSTEM_PROMPT + lang_prompt),
             LLMMessage(
                 role="user",
                 content=prompt,
@@ -1202,10 +1474,13 @@ class ConversationalComputerUseAgent:
         ]
 
         try:
-            resp = await self._router.generate(
-                messages=messages,
-                tier=ModelTier.VISION,
-                temperature=0.1,
+            resp = await asyncio.wait_for(
+                self._router.generate(
+                    messages=messages,
+                    tier=ModelTier.VISION,
+                    temperature=0.1,
+                ),
+                timeout=15.0,
             )
             raw_text = resp.content or "{}"
 

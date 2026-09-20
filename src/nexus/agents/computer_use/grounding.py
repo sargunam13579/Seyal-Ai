@@ -50,26 +50,20 @@ class VisualGroundingEngine:
         if shot.active_window:
             obs.active_window = shot.active_window.title
 
-        # 2. Extract UI controls and OCR text blocks concurrently
-        async def _run_ui_detection() -> list[Any]:
-            try:
-                return await asyncio.to_thread(self._detector.detect_elements)
-            except Exception as e:
-                log.debug("UI element detection notice: %s", e)
-                return []
+        # 2. Extract UI controls and OCR text blocks conditionally (Fast Path)
+        elements: list[Any] = []
+        try:
+            elements = await asyncio.to_thread(self._detector.detect_elements)
+        except Exception as e:
+            log.debug("UI element detection notice: %s", e)
 
-        async def _run_ocr() -> Any | None:
+        ocr_res = None
+        # Selective OCR: If UI automation found sufficient interactive controls, skip heavy full-screen OCR
+        if len(elements) < 15 and obs.screenshot_path and os.path.exists(obs.screenshot_path):
             try:
-                if obs.screenshot_path and os.path.exists(obs.screenshot_path):
-                    return await self._ocr.recognize(obs.screenshot_path)
+                ocr_res = await self._ocr.recognize(obs.screenshot_path)
             except Exception as e:
-                log.debug("OCR recognition notice: %s", e)
-            return None
-
-        elements, ocr_res = await asyncio.gather(
-            _run_ui_detection(),
-            _run_ocr(),
-        )
+                log.debug("Selective OCR recognition notice: %s", e)
 
         detected: list[dict[str, Any]] = []
         for el in elements[:30]:
@@ -209,9 +203,15 @@ class VisualGroundingEngine:
                     )
 
                 combined = Image.alpha_composite(annotated, overlay).convert("RGB")
+                # Fast Cloud Upload Optimization: Downscale to max width 1280 (saving 95%+ bandwidth)
+                if combined.width > 1280:
+                    scale = 1280.0 / combined.width
+                    new_size = (1280, int(combined.height * scale))
+                    combined = combined.resize(new_size, Image.Resampling.LANCZOS)
+
                 tmp_dir = tempfile.gettempdir()
-                som_path = os.path.join(tmp_dir, f"nexus_som_{int(time.time() * 1000)}.png")
-                combined.save(som_path, format="PNG")
+                som_path = os.path.join(tmp_dir, f"nexus_som_{int(time.time() * 1000)}.jpg")
+                combined.save(som_path, format="JPEG", quality=75, optimize=True)
                 return som_path
 
         return await asyncio.to_thread(_draw)

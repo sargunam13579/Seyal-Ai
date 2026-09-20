@@ -92,10 +92,14 @@ class GeminiProvider(BaseLLMProvider):
         for current_model in models_to_try:
             try:
                 log.info("[GEMINI REQUEST START] model='%s'", current_model)
-                response = await client.aio.models.generate_content(
-                    model=current_model,
-                    contents=contents,
-                    config=config,
+                import asyncio
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=current_model,
+                        contents=contents,
+                        config=config,
+                    ),
+                    timeout=12.0,
                 )
                 log.info("[GEMINI RESPONSE RECEIVED] model='%s'", current_model)
                 return self._parse_response(response, current_model)
@@ -123,6 +127,74 @@ class GeminiProvider(BaseLLMProvider):
             finish_reason="error",
             model=models_to_try[0] if models_to_try else "gemini-flash-lite-latest",
         )
+
+    async def generate_stream(
+        self,
+        messages: list[LLMMessage],
+        model: str,
+        tools: list[ToolSchema] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+    ):
+        """Generate a streaming response using Google Gemini, yielding text delta chunks in real time."""
+        client = self._ensure_client()
+        from google.genai import types
+
+        system_instruction, contents = self._convert_messages(messages)
+
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+            system_instruction=system_instruction,
+        )
+
+        if tools:
+            gemini_tools = self._convert_tools(tools)
+            config.tools = gemini_tools
+
+        valid_models = [
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+        ]
+
+        models_to_try: list[str] = []
+        if model:
+            models_to_try.append(model)
+        for fallback in valid_models:
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
+
+        for current_model in models_to_try:
+            try:
+                log.info("[GEMINI STREAM START] model='%s'", current_model)
+                stream = await client.aio.models.generate_content_stream(
+                    model=current_model,
+                    contents=contents,
+                    config=config,
+                )
+                async for chunk in stream:
+                    if chunk.text:
+                        yield chunk.text
+                log.info("[GEMINI STREAM COMPLETED] model='%s'", current_model)
+                return
+            except Exception as e:
+                log.warning("Gemini stream notice on '%s' (%s), attempting fallback...", current_model, e)
+                continue
+
+        # Fallback to single pass if stream unavailable
+        resp = await self.generate(
+            messages=messages,
+            model=model,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if resp.content:
+            yield resp.content
 
     def _convert_messages(self, messages: list[LLMMessage]) -> tuple[str | None, list[Any]]:
         """Convert LLMMessages to Gemini system instruction and content list."""

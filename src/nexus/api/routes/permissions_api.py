@@ -26,12 +26,39 @@ class RevokeScopeRequest(BaseModel):
     scope: str = Field(..., description="The permission scope to revoke")
 
 
+class SetModeRequest(BaseModel):
+    scope: str = Field(..., description="The permission scope to configure")
+    mode: str = Field(..., description="The permission mode: 'allow', 'ask', or 'block'")
+
+
 @router.get("", summary="List all permission scopes")
 async def list_permissions() -> dict[str, Any]:
-    """Get the current grant status of all capability permission scopes."""
+    """Get the current status of all capability permission scopes."""
     scopes = _scope_manager.list_scopes()
     return {
-        "scopes": {k: {"scope": v.scope, "granted": v.granted, "description": v.description} for k, v in scopes.items()}
+        "scopes": {
+            k: {
+                "scope": v.scope,
+                "granted": v.granted,
+                "mode": getattr(v, "mode", "allow" if v.granted else "block"),
+                "last_accessed_at": getattr(v, "last_accessed_at", None),
+                "last_accessed_by": getattr(v, "last_accessed_by", None),
+                "description": v.description,
+            }
+            for k, v in scopes.items()
+        }
+    }
+
+
+@router.post("/mode", summary="Set permission 3-way mode")
+async def set_permission_mode(req: SetModeRequest) -> dict[str, Any]:
+    """Set 3-way permission mode: allow, ask, or block."""
+    _scope_manager.set_mode(req.scope, req.mode)
+    return {
+        "success": True,
+        "scope": req.scope,
+        "mode": req.mode,
+        "message": f"Permission scope '{req.scope}' set to '{req.mode}'.",
     }
 
 
@@ -64,3 +91,4 @@ async def reset_permissions() -> dict[str, Any]:
     """Reset all capability scopes to default granted state."""
     _scope_manager.reset_defaults()
     return {"success": True, "message": "All permission scopes reset to defaults."}
+

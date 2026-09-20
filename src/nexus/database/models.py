@@ -50,7 +50,10 @@ class User(Base):
     voice_profile_path: Mapped[str | None] = mapped_column(String(500))
     pin_hash: Mapped[str | None] = mapped_column(String(256))
     age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dob: Mapped[str | None] = mapped_column(String(50), nullable=True)
     gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    mother_tongue: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    known_languages: Mapped[list[str] | None] = mapped_column(JSON, default=list, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Relationships
@@ -338,3 +341,24 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog(action={self.action_type!r}, tool={self.tool_name!r})>"
+
+
+# ---------------------------------------------------------------------------
+# Sync Outbox (Offline-first Cloud Sync)
+# ---------------------------------------------------------------------------
+
+
+class SyncOutbox(Base):
+    __tablename__ = "sync_outbox"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    entity_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "conversation", "message"
+    entity_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)  # "UPSERT", "DELETE"
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    def __repr__(self) -> str:
+        return f"<SyncOutbox(entity={self.entity_type!r}, id={self.entity_id!r}, action={self.action!r})>"
+

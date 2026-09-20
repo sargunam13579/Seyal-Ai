@@ -297,9 +297,10 @@ class ComputerActionExecutor:
             return {"action": "open_app", "target": url, "success": True}
 
         if "google" in target or "search" in target:
+            import re
             import urllib.parse
             import webbrowser
-            query = target.replace("google", "").replace("search", "").replace("for", "").replace("la", "").replace("pannu", "").strip()
+            query = re.sub(r"^(google\s*search\s*(for)?|search\s*(for)?|google)\s*", "", target, flags=re.IGNORECASE).strip()
             if not query:
                 query = "weather"
             url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"

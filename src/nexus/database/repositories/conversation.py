@@ -24,12 +24,24 @@ class ConversationRepository:
     async def create_conversation(
         self, session_id: str, summary: str | None = None, conversation_id: str | None = None
     ) -> Conversation:
-        """Create a new conversation."""
+        """Create a new conversation: Supabase first (when connected), then Local SQLite."""
         conversation = (
             Conversation(id=conversation_id, session_id=session_id, summary=summary)
             if conversation_id
             else Conversation(session_id=session_id, summary=summary)
         )
+        # 1. Supabase first (if connected; queues outbox if offline)
+        try:
+            from nexus.database.sync import sync_manager
+            await sync_manager.save_conversation_ordered(
+                session_id=session_id,
+                summary=summary,
+                conversation_id=conversation.id,
+            )
+        except Exception:
+            pass
+
+        # 2. Local SQLite second
         self._session.add(conversation)
         await self._session.flush()
         return conversation
@@ -49,12 +61,25 @@ class ConversationRepository:
         role: str,
         content: str,
     ) -> Message:
-        """Add a message to a conversation."""
+        """Add a message to a conversation: Supabase first (when connected), then Local SQLite."""
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
         )
+        # 1. Supabase first (if connected; queues outbox if offline)
+        try:
+            from nexus.database.sync import sync_manager
+            await sync_manager.save_message_ordered(
+                conversation_id=conversation_id,
+                role=role,
+                content=content,
+                message_id=message.id,
+            )
+        except Exception:
+            pass
+
+        # 2. Local SQLite second
         self._session.add(message)
         await self._session.flush()
         return message
@@ -131,10 +156,11 @@ class ConversationRepository:
     async def list_conversations(
         self,
         offset: int = 0,
-        limit: int = 20,
+        limit: int | None = None,
     ) -> tuple[list[Conversation], int]:
         """
-        List conversations with pagination.
+        List conversations with optional pagination.
+        If limit is None or <= 0, fetches all conversations without restriction.
 
         Returns:
             A tuple of (conversations, total_count).
@@ -145,13 +171,14 @@ class ConversationRepository:
         count_result = await self._session.execute(select(func.count()).select_from(Conversation))
         total = count_result.scalar() or 0
 
-        # Get paginated results
-        result = await self._session.execute(
-            select(Conversation)
-            .order_by(Conversation.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-        )
+        # Get results with optional limit
+        query = select(Conversation).order_by(Conversation.created_at.desc())
+        if offset > 0:
+            query = query.offset(offset)
+        if limit is not None and limit > 0:
+            query = query.limit(limit)
+
+        result = await self._session.execute(query)
         conversations = list(result.scalars().all())
         return conversations, total
 
@@ -167,7 +194,15 @@ class ConversationRepository:
         return result.scalar() or 0
 
     async def delete_conversation(self, conversation_id: str) -> None:
-        """Delete a conversation and all its related data (cascades)."""
+        """Delete a conversation: Supabase first (when connected), then Local SQLite."""
+        # 1. Supabase first (if connected; queues outbox if offline)
+        try:
+            from nexus.database.sync import sync_manager
+            await sync_manager.delete_conversation_ordered(conversation_id)
+        except Exception:
+            pass
+
+        # 2. Local SQLite second
         result = await self._session.execute(
             select(Conversation).where(Conversation.id == conversation_id)
         )
@@ -175,3 +210,28 @@ class ConversationRepository:
         if conversation:
             await self._session.delete(conversation)
             await self._session.flush()
+
+    async def batch_delete_conversations(self, conversation_ids: list[str]) -> list[str]:
+        """Delete multiple conversations: Supabase first (one by one), then Local SQLite."""
+        if not conversation_ids:
+            return []
+
+        # 1. Supabase first (one by one if connected; queues outbox if offline)
+        try:
+            from nexus.database.sync import sync_manager
+            await sync_manager.batch_delete_ordered(conversation_ids)
+        except Exception:
+            pass
+
+        # 2. Local SQLite second
+        result = await self._session.execute(
+            select(Conversation).where(Conversation.id.in_(conversation_ids))
+        )
+        conversations = list(result.scalars().all())
+        deleted_ids = []
+        for conv in conversations:
+            deleted_ids.append(conv.id)
+            await self._session.delete(conv)
+        await self._session.flush()
+
+        return deleted_ids

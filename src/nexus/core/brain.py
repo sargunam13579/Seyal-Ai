@@ -283,6 +283,23 @@ class NexusBrain:
         self._audio_feedback.on_success()
         return response
 
+    async def process_stream(self, user_input: str, allow_tools: bool = False):
+        """
+        Process user input and stream response chunks in real-time.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        clean_input = user_input.strip()
+        tier = self._classify_tier(clean_input)
+
+        async for chunk in self._orchestrator.process_stream(
+            user_input=clean_input,
+            tier=tier,
+            allow_tools=allow_tools,
+        ):
+            yield chunk
+
     def request_name_change(self, target_name: str) -> str:
         """
         Initiate a name change request requiring user confirmation.

@@ -6,7 +6,9 @@ REST endpoints for voice transcription, synthesis, and configuration.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+import json
+import numpy as np
 from fastapi.responses import Response
 
 from nexus.api.schemas import (
@@ -57,7 +59,7 @@ def _get_brain(request: Request):
 async def transcribe_audio(
     request: Request,
     audio: UploadFile = File(..., description="Audio file (WAV, 16kHz mono preferred)"),
-    language: str = "en-US",
+    language: str = "auto",
 ) -> VoiceTranscribeResponse:
     """
     Upload an audio file and get the transcribed text.
@@ -83,13 +85,13 @@ async def transcribe_audio(
                 detail="Invalid audio format. Please upload a WAV file.",
             ) from e
 
-        # Transcribe using cached STT engine (avoids re-init overhead)
+        # Transcribe using cached STT engine with multilingual language detection
         stt = _get_cached_stt_engine(settings.voice.stt_provider, language)
-        text = await stt.transcribe(audio_data, sample_rate, language)
+        trans_res = await stt.transcribe_with_language(audio_data, sample_rate, language)
 
         return VoiceTranscribeResponse(
-            text=text,
-            language=language,
+            text=trans_res.text,
+            language=trans_res.language,
             provider=stt.provider_name,
             success=True,
         )
@@ -299,3 +301,125 @@ async def stop_voice(request: Request) -> dict:
 
     await brain.stop_voice()
     return {"status": "stopped", "message": "Voice pipeline stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Realtime WebSocket Audio Streaming & Instant Barge-In
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/ws")
+async def voice_websocket_stream(websocket: WebSocket) -> None:
+    """
+    Bidirectional Real-Time Voice WebSocket.
+
+    - Receives streaming 16kHz 16-bit Mono PCM audio chunks directly from client mic.
+    - Runs Voice Activity Detection (Silero VAD / Energy filter).
+    - Emits instant 'barge_in' event if user speaks while assistant is speaking.
+    - Performs fast STT transcription on silence boundary and emits 'transcript' event.
+    """
+    await websocket.accept()
+    log.info("Client connected to Realtime Voice WebSocket (/voice/ws)")
+
+    from nexus.voice.vad import VADState, VoiceActivityDetector
+
+    vad = VoiceActivityDetector(sample_rate=16000, silence_threshold_ms=1800, min_speech_ms=250, energy_threshold=100)
+    vad.reset()
+
+    language = "auto"
+    is_speaking_turn = False
+    speech_chunks: list[np.ndarray] = []
+
+    try:
+        # Acknowledge connection
+        await websocket.send_text(json.dumps({
+            "event": "connected",
+            "message": "Seyal AI Realtime Voice Connected",
+            "sample_rate": 16000,
+        }))
+
+        while True:
+            message = await websocket.receive()
+            if "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    msg_type = payload.get("type", "")
+
+                    if msg_type == "config":
+                        if "language" in payload:
+                            language = payload["language"]
+                            log.info("Realtime Voice language updated to: %s", language)
+                    elif msg_type == "assistant_speaking":
+                        is_speaking_turn = payload.get("status", False)
+                        if is_speaking_turn:
+                            speech_chunks.clear()
+                    elif msg_type == "ping":
+                        await websocket.send_text(json.dumps({"event": "pong"}))
+                except Exception as parse_err:
+                    log.debug("WebSocket text message parse error: %s", parse_err)
+
+            elif "bytes" in message and message["bytes"]:
+                raw_bytes = message["bytes"]
+                if len(raw_bytes) == 0:
+                    continue
+
+                # Discard microphone input while assistant is speaking or preparing speech (prevents self-hearing echo)
+                if is_speaking_turn:
+                    speech_chunks.clear()
+                    continue
+
+                # Interpret bytes as 16-bit signed PCM
+                chunk_int16 = np.frombuffer(raw_bytes, dtype=np.int16)
+                vad_state = vad.process_chunk(chunk_int16)
+
+                if vad_state == VADState.SPEECH:
+                    speech_chunks.append(chunk_int16)
+
+                elif vad_state == VADState.SILENCE and speech_chunks:
+                    # Speech segment completed: transcribe
+                    full_audio = np.concatenate(speech_chunks)
+                    speech_chunks = []
+                    vad.reset()
+
+                    # Minimum duration check (~0.25 seconds)
+                    if len(full_audio) >= 4000:
+                        try:
+                            # Use cached Multilingual STT engine
+                            stt_prov = "multilingual_gemini"
+                            try:
+                                settings = getattr(websocket.app.state, "settings", None)
+                                if settings and settings.voice.stt_provider:
+                                    stt_prov = settings.voice.stt_provider
+                            except Exception:
+                                pass
+
+                            stt = _get_cached_stt_engine(stt_prov, language)
+                            trans_res = await stt.transcribe_with_language(full_audio, 16000, language)
+                            if trans_res.text and trans_res.text.strip():
+                                await websocket.send_text(json.dumps({
+                                    "event": "transcript",
+                                    "text": trans_res.text.strip(),
+                                    "language": trans_res.language,
+                                }))
+                            else:
+                                await websocket.send_text(json.dumps({
+                                    "event": "stt_empty",
+                                    "message": "Speech could not be recognized",
+                                    "language": language,
+                                }))
+                        except Exception as stt_err:
+                            log.debug("Realtime STT transcribe notice: %s", stt_err)
+                            try:
+                                await websocket.send_text(json.dumps({
+                                    "event": "stt_error",
+                                    "error": str(stt_err),
+                                    "language": language,
+                                }))
+                            except Exception:
+                                pass
+
+    except WebSocketDisconnect:
+        log.info("Client disconnected from Realtime Voice WebSocket")
+    except Exception as e:
+        log.error("Realtime Voice WebSocket error: %s", e)
+

@@ -160,6 +160,7 @@ class TestArea7BrowserControl:
 
     def test_browser_action_safety_and_scope(self):
         perm = PermissionScopeManager()
+        perm.grant_scope(PermissionScope.ACCESSIBILITY)
         assert perm.is_scope_granted(PermissionScope.ACCESSIBILITY) is True
         perm.revoke_scope(PermissionScope.ACCESSIBILITY)
         assert perm.is_scope_granted(PermissionScope.ACCESSIBILITY) is False
@@ -186,6 +187,7 @@ class TestArea9AndroidControl:
 
     def test_android_device_scope_check(self):
         engine = PermissionEngine()
+        engine.scope_manager.grant_scope(PermissionScope.DEVICE_CONTROL)
         assert engine.scope_manager.is_tool_allowed("android_adb") is True
 
         engine.scope_manager.revoke_scope(PermissionScope.DEVICE_CONTROL)
@@ -265,7 +267,9 @@ class TestArea13Permissions:
         storage = tmp_path / "perms.json"
         mgr = PermissionScopeManager(storage_path=storage)
 
-        # Initially all scopes granted
+        # Explicitly grant scopes
+        mgr.grant_scope(PermissionScope.CAMERA)
+        mgr.grant_scope(PermissionScope.MICROPHONE)
         assert mgr.is_scope_granted(PermissionScope.CAMERA) is True
         assert mgr.is_scope_granted(PermissionScope.MICROPHONE) is True
 

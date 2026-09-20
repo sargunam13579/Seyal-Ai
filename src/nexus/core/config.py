@@ -90,14 +90,14 @@ class VoiceWhisperSettings(BaseSettings):
 
 
 class VoiceSTTSettings(BaseSettings):
-    language: str = "en-US"
+    language: str = "auto"
     supported_languages: list[str] = Field(
-        default_factory=lambda: ["en-US"],
+        default_factory=lambda: ["auto", "ta-IN", "en-IN", "en-US", "hi-IN"],
     )
 
 
 class VoiceTTSSettings(BaseSettings):
-    voice: str = "en-US-JennyNeural"
+    voice: str = "auto"
     speed: float = 1.0
     fallback_voice: str = ""  # pyttsx3 voice ID (auto-detected if empty)
 
@@ -111,15 +111,15 @@ class VoiceVADSettings(BaseSettings):
 class VoiceSettings(BaseSettings):
     enabled: bool = False
     wake_word: str = "hey nexus"
-    stt_provider: str = "google_web"  # google_web | vosk
+    stt_provider: str = "multilingual_gemini"  # multilingual_gemini | google_web | vosk
     tts_provider: str = "edge"  # edge | pyttsx3
     interaction_mode: str = "voice_and_text"  # voice_and_text | voice_only | text_only
-    silence_threshold_ms: int = 1500
+    silence_threshold_ms: int = 800
     sample_rate: int = 16000
     interrupt_enabled: bool = True
-    language: str = "en-US"
+    language: str = "auto"
     supported_languages: list[str] = Field(
-        default_factory=lambda: ["en-US", "en-IN", "ta-IN"],
+        default_factory=lambda: ["auto", "ta-IN", "en-IN", "en-US", "hi-IN"],
     )
     whisper: VoiceWhisperSettings = Field(default_factory=VoiceWhisperSettings)
     stt: VoiceSTTSettings = Field(default_factory=VoiceSTTSettings)

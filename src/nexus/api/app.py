@@ -21,6 +21,7 @@ from nexus.api.routes import (
     android,
     auth,
     automation,
+    awareness_api,
     browser,
     chat,
     computer_use,
@@ -70,8 +71,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log.info("Starting NEXUS API v%s", settings.version)
 
     # Initialize database
-    actual_db_url = settings.database_url or f"sqlite+aiosqlite:///{settings.resolved_data_dir / 'nexus.db'}"
-    await init_engine(actual_db_url, echo=settings.database.echo)
+    local_db_url = f"sqlite+aiosqlite:///{settings.resolved_data_dir / 'nexus.db'}"
+    cloud_db_url = settings.database_url if ("postgres" in (settings.database_url or "")) else None
+    await init_engine(db_url=local_db_url, cloud_url=cloud_db_url, echo=settings.database.echo)
+
+    # Start background database sync manager
+    from nexus.database.sync import sync_manager
+    await sync_manager.start()
 
     # Initialize the AI Brain
     brain = NexusBrain(settings)
@@ -100,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- SHUTDOWN ---
     log.info("Shutting down NEXUS API...")
+    from nexus.database.sync import sync_manager
+    await sync_manager.stop()
     await close_engine()
     log.info("NEXUS API stopped")
 
@@ -172,6 +180,7 @@ def create_app(settings: NexusSettings | None = None) -> FastAPI:
     app.include_router(pairing_api.router, prefix=prefix)
     app.include_router(accessibility_api.router, prefix=prefix)
     app.include_router(computer_use.router, prefix=prefix)
+    app.include_router(awareness_api.router, prefix=prefix)
 
     # Root redirect to docs
     @app.get("/", include_in_schema=False)

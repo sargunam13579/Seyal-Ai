@@ -16,6 +16,7 @@ import json
 import uuid
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -25,6 +26,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
+from fastapi.responses import StreamingResponse
 
 from nexus.api.schemas import (
     ChatResetResponse,
@@ -316,6 +318,7 @@ async def _persist_chat_turn(
     user_message: str,
     file_names: list[str],
     response_text: str,
+    brain: Any | None = None,
 ) -> None:
     """Non-blocking background helper to persist chat conversation and messages to Supabase database."""
     try:
@@ -346,10 +349,24 @@ async def _persist_chat_turn(
                     await session.flush()
 
                 summary_source = user_message or (file_names[0] if file_names else "File Analysis")
-                clean_summary = summary_source.strip()[:42] + ("..." if len(summary_source.strip()) > 42 else "")
+                # Gather existing titles in simple chat category for strict uniqueness
+                all_convs, _ = await repo.list_conversations(offset=0, limit=200)
+                existing_titles = {
+                    (c.summary or "").strip().lower()
+                    for c in all_convs
+                    if not (c.summary or "").startswith("[Computer-Use]")
+                }
+                from nexus.services.title_service import generate_ai_title_for_first_turn
+                clean_initial_title = await generate_ai_title_for_first_turn(
+                    first_message=summary_source,
+                    existing_category_titles=existing_titles,
+                    brain=brain,
+                    is_computer_use=False,
+                )
+
                 conv = await repo.create_conversation(
                     session_id=db_session.id,
-                    summary=clean_summary,
+                    summary=clean_initial_title,
                     conversation_id=target_conv_id,
                 )
 
@@ -368,6 +385,16 @@ async def _persist_chat_turn(
                 content=response_text,
             )
             await session.commit()
+
+            # Trigger periodic dynamic title evaluation in background if due
+            from nexus.services.title_service import run_periodic_title_update_if_needed
+            await run_periodic_title_update_if_needed(
+                conversation_id=conv.id,
+                session=session,
+                repo=repo,
+                brain=brain,
+                is_computer_use=False,
+            )
     except Exception as db_error:
         log.warning("Non-blocking background database persistence notice: %s", db_error)
 
@@ -507,7 +534,7 @@ async def chat(
     try:
         response_text = await brain.process(
             final_input,
-            allow_tools=False,
+            allow_tools=True,
         )
 
     except Exception as error:
@@ -538,6 +565,7 @@ async def chat(
             user_message=user_message,
             file_names=uploaded_filenames,
             response_text=response_text,
+            brain=brain,
         )
     )
 
@@ -657,6 +685,104 @@ async def chat(
         conversation_id=final_conv_id,
         model_used=model_used,
         tool_calls=tool_calls,
+    )
+
+
+@router.post(
+    "/chat/stream",
+    summary="Send a message to NEXUS with real-time SSE streaming",
+    description="Stream response tokens in real-time as they are generated.",
+)
+async def chat_stream(
+    request: Request,
+    message: str = Form(""),
+    conversation_id: str | None = Form(None),
+    files: list[UploadFile] = File(default=[]),
+):
+    brain = request.app.state.brain
+
+    if not message.strip() and not files:
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide a message or at least one file.",
+        )
+
+    if not brain.is_initialized:
+        try:
+            await brain.initialize()
+        except Exception as error:
+            log.error("Brain initialization failed: %s", error)
+            raise HTTPException(
+                status_code=503,
+                detail=f"NEXUS AI Brain failed to initialize: {error}",
+            ) from error
+
+    if not brain._router.has_providers:
+        raise HTTPException(
+            status_code=503,
+            detail="No LLM providers available. Please configure at least one API key.",
+        )
+
+    extracted_files: list[str] = []
+    for uploaded_file in files:
+        extracted = await extract_file_content(uploaded_file)
+        extracted_files.append(extracted)
+
+    file_context = "\n".join(extracted_files)
+    user_message = message.strip()
+
+    if file_context:
+        if user_message:
+            final_input = f"{user_message}\n\nUploaded file content:\n{file_context}"
+        else:
+            final_input = f"Analyze the uploaded file and explain its content.\n\nUploaded file content:\n{file_context}"
+    else:
+        final_input = user_message
+
+    active_conversation_id = conversation_id or str(uuid.uuid4())
+    uploaded_filenames = [f.filename or "uploaded_file" for f in files] if files else []
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conversation_id})}\n\n"
+        full_chunks = []
+        try:
+            from nexus.core.orchestrator import _requires_tools
+            if _requires_tools(final_input):
+                resp = await brain.process(final_input, allow_tools=True)
+                full_chunks.append(resp)
+                yield f"data: {json.dumps({'type': 'chunk', 'text': resp})}\n\n"
+            else:
+                async for chunk in brain.process_stream(final_input, allow_tools=True):
+                    full_chunks.append(chunk)
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
+        except Exception as e:
+            log.error("Stream generation error: %s", e)
+            fallback = "I encountered an error processing your request. Please try again."
+            full_chunks.append(fallback)
+            yield f"data: {json.dumps({'type': 'chunk', 'text': fallback})}\n\n"
+
+        response_text = "".join(full_chunks)
+        yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conversation_id, 'full_response': response_text})}\n\n"
+
+        # Background persistence & title service
+        asyncio.create_task(
+            _persist_chat_turn(
+                target_conv_id=active_conversation_id,
+                user_message=user_message,
+                file_names=uploaded_filenames,
+                response_text=response_text,
+                brain=brain,
+            )
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

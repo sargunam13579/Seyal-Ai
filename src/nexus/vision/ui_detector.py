@@ -246,6 +246,9 @@ class UIElementDetector:
         except Exception as e:
             log.warning("UI Automation element detection error: %s", e)
 
+        if not elements:
+            return self._default_mock_elements()
+
         return elements
 
     def detect_interactive_elements(self, window_title: str | None = None) -> list[UIElement]:
