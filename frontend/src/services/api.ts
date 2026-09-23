@@ -441,6 +441,25 @@ export const api = {
     });
 
     if (!response.ok) {
+      console.warn(`[api] /computer-use/stream returned ${response.status}, attempting fallback to /computer-use/run`);
+      try {
+        const fallbackResult = await this.runComputerUseGoal(goal, maxSteps, autoConfirm, conversationId);
+        if (fallbackResult) {
+          const narr = fallbackResult.narration || 'Completed task.';
+          onChunk?.(narr);
+          onDone?.({
+            conversation_id: fallbackResult.conversation_id || conversationId || '',
+            narration: narr,
+            is_task: fallbackResult.is_task ?? false,
+            status: fallbackResult.status || 'completed',
+            history: fallbackResult.history || [],
+            steps_executed: fallbackResult.steps_executed ?? 0,
+          });
+          return;
+        }
+      } catch (fallbackErr) {
+        console.error('[api] Fallback to runComputerUseGoal also failed:', fallbackErr);
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 

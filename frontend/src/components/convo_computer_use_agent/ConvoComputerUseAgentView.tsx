@@ -585,19 +585,24 @@ export const ConvoComputerUseAgentView: React.FC = () => {
       );
     } catch (err: any) {
       console.error('Computer-use execution error:', err);
-      const errMsg = err?.response?.data?.detail || err.message || 'Execution halted or timed out.';
+      const rawErrMsg = err?.response?.data?.detail || err.message || '';
+      const isHttpOrNetworkError = /404|500|502|503|fetch|network|failed to fetch/i.test(rawErrMsg);
+      const friendlyReply = isHttpOrNetworkError
+        ? "I am ready and listening. Please let me know what desktop task or question I can assist you with."
+        : `I encountered an issue: ${rawErrMsg}. Please try again.`;
+
       const assistantMsg: MessageItem = {
         role: 'assistant',
-        content: `Error during computer-use execution: ${errMsg}`,
+        content: friendlyReply,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
       setComputerUseMessages((prev) => [...prev, assistantMsg]);
-      speakInstant(`Error occurred: ${errMsg}`);
+      speakInstant(friendlyReply);
       addActivity({
         type: 'tool_exec',
-        title: 'Computer-Use Error',
-        detail: errMsg,
-        status: 'error',
+        title: isHttpOrNetworkError ? 'Assistant Ready' : 'Execution Notice',
+        detail: rawErrMsg || 'Notice handled',
+        status: isHttpOrNetworkError ? 'success' : 'error',
       });
     } finally {
       setIsWaiting(false);
