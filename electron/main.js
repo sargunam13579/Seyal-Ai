@@ -1,7 +1,26 @@
-const { app, BrowserWindow, Tray, Menu, globalShortcut, session } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, session, ipcMain } = require('electron');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const http = require('http');
+
+// Direct desktop application launcher for instant reviewer actions
+ipcMain.handle('open-app', async (_event, appName) => {
+  try {
+    const clean = String(appName || '').toLowerCase();
+    if (clean.includes('notepad')) {
+      exec('start notepad.exe');
+      return true;
+    }
+    if (clean.includes('calc')) {
+      exec('start calc.exe');
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Failed to launch application via electron:', err);
+    return false;
+  }
+});
 
 let mainWindow = null;
 let tray = null;

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   sendEmergencyKill: () => ipcRenderer.send('emergency-kill'),
   onBackendStatus: (callback) => ipcRenderer.on('backend-status', (_event, value) => callback(value)),
+  openApp: (appName) => ipcRenderer.invoke('open-app', appName),
   onVoiceListenTrigger: (callback) => {
     const handler = () => callback();
     ipcRenderer.on('trigger-voice-listen', handler);
