@@ -64,8 +64,8 @@ interface VoiceContextType {
 
 const VoiceContext = createContext<VoiceContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_VOICE_KEY = 'nexus_preferred_voice_name';
-const LOCAL_STORAGE_SPEED_KEY = 'nexus_speech_speed';
+const LOCAL_STORAGE_VOICE_KEY = 'seyal_preferred_voice_name';
+const LOCAL_STORAGE_SPEED_KEY = 'seyal_speech_speed';
 export const DEFAULT_HUMAN_SPEED = 0.88; // Relaxed, crystal-clear, natural human cadence
 
 // Curated list of pristine, crystal-clear studio Multilingual and Regional Neural voices
@@ -273,9 +273,9 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [autoVoiceResponse, setAutoVoiceResponse] = useState<boolean>(true);
   const [recognitionLang, setRecognitionLangState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('nexus_recognition_lang');
+      const stored = localStorage.getItem('seyal_recognition_lang');
       if (!stored || stored === 'en-IN' || stored === 'en-US') {
-        localStorage.setItem('nexus_recognition_lang', 'auto');
+        localStorage.setItem('seyal_recognition_lang', 'auto');
         return 'auto';
       }
       return stored;
@@ -328,7 +328,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     recognitionLangRef.current = lang;
     setRecognitionLangState(lang);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('nexus_recognition_lang', lang);
+      localStorage.setItem('seyal_recognition_lang', lang);
     }
     if (recognitionRef.current && isRecognitionActiveRef.current) {
       try {
@@ -530,7 +530,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
     activeUtteranceRef.current = null;
-    (window as any).__nexus_active_utterance = null;
+    (window as any).__seyal_active_utterance = null;
 
     if (!isProcessingRef.current) {
       setVoiceState((prev) => (prev === 'speaking' ? (voiceModeEnabledRef.current ? 'listening' : 'idle') : prev));
@@ -1243,7 +1243,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         activeAudioRef.current = null;
         activeUtteranceRef.current = null;
-        (window as any).__nexus_active_utterance = null;
+        (window as any).__seyal_active_utterance = null;
 
         if (activeAudioUrlRef.current) {
           try {
@@ -1498,7 +1498,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             };
 
             activeUtteranceRef.current = utterance;
-            (window as any).__nexus_active_utterance = utterance;
+            (window as any).__seyal_active_utterance = utterance;
             isSpeakingRef.current = true;
             setVoiceState('speaking');
 

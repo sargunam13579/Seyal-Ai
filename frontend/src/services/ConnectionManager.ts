@@ -1,11 +1,10 @@
 /**
- * Seyal AI — Resilient Connection Manager.
+ * Seyal AI � High-Performance Resilient Connection Manager.
  * 
- * Implements a ChatGPT-style decoupled state machine:
- * - Instant sub-millisecond local liveness check (/api/health)
- * - Decoupled background subsystem check (/api/ready)
- * - Exponential backoff with jitter on disconnect
- * - Zero user action required (no manual Ctrl+R needed for auto-recovery)
+ * Implements ChatGPT/Gemini-grade connection architecture:
+ * - Method A: Native Hardware Network Listener (window.ononline / window.onoffline)
+ * - Method B: Passive On-Demand Health Monitoring (no CPU-burning 5s polling loop, no false-alarm yellow bars)
+ * - Method C: Silent Auto-Recovery & Stream Resiliency
  */
 
 import { api } from './api';
@@ -16,6 +15,7 @@ export type ConnectionState =
   | 'CONNECTING'
   | 'CONNECTED'
   | 'DEGRADED'
+  | 'OFFLINE'
   | 'RECONNECTING';
 
 export interface ReadinessInfo {
@@ -33,27 +33,52 @@ class ConnectionManager {
   
   private consecutiveFailures = 0;
   private pollTimer: any = null;
-  private readyTimer: any = null;
   private isDestroyed = false;
+  private isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
 
-  // Backoff intervals in ms
-  private readonly backoffSchedule = [1000, 2000, 4000, 8000, 15000, 30000];
+  constructor() {
+    this.setupHardwareListeners();
+  }
+
+  /**
+   * Method A: Hardware Network Detection (Instant zero-CPU detection)
+   */
+  private setupHardwareListeners() {
+    if (typeof window === 'undefined') return;
+
+    window.addEventListener('online', () => {
+      console.log('[ConnectionManager] Hardware network restored (online)');
+      this.isOnline = true;
+      this.consecutiveFailures = 0;
+      this.checkHealth();
+    });
+
+    window.addEventListener('offline', () => {
+      console.log('[ConnectionManager] Hardware network disconnected (offline)');
+      this.isOnline = false;
+      this.setState('OFFLINE');
+    });
+
+    // On window focus (user switches back to Seyal AI), verify liveness once on-demand
+    window.addEventListener('focus', () => {
+      if (this.state !== 'CONNECTED') {
+        this.checkHealth();
+      }
+    });
+  }
 
   public start() {
     this.isDestroyed = false;
     this.checkHealth();
-    this.startReadinessPolling();
   }
 
   public stop() {
     this.isDestroyed = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
-    if (this.readyTimer) clearInterval(this.readyTimer);
   }
 
   public subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
-    // Emit immediate current state
     listener(this.state, this.healthData, this.readinessData);
     return () => {
       this.listeners.delete(listener);
@@ -72,9 +97,13 @@ class ConnectionManager {
     return this.readinessData;
   }
 
+  public isNetworkOnline(): boolean {
+    return this.isOnline;
+  }
+
   private setState(nextState: ConnectionState) {
     if (this.state !== nextState) {
-      console.log(`[ConnectionManager] ${this.state} ──► ${nextState}`);
+      console.log(`[ConnectionManager] ${this.state} -> ${nextState}`);
       this.state = nextState;
       this.notifyListeners();
     }
@@ -91,46 +120,57 @@ class ConnectionManager {
   }
 
   /**
-   * Instant local liveness probe (/api/health)
+   * Method B: Intelligent On-Demand Health Probe
+   * Only transitions to RECONNECTING after 3 consecutive hard failures
+   * Never flashes false-alarm yellow bars on momentary task latencies
    */
   public async checkHealth(): Promise<boolean> {
     if (this.isDestroyed) return false;
+
+    // If hardware is offline, immediately remain OFFLINE
+    if (!this.isOnline) {
+      this.setState('OFFLINE');
+      return false;
+    }
 
     try {
       const data = await api.getHealth();
       this.healthData = data;
       this.consecutiveFailures = 0;
-
-      // Immediately recover if we were reconnecting or starting
-      if (this.readinessData?.status === 'degraded') {
-        this.setState('DEGRADED');
-      } else {
-        this.setState('CONNECTED');
-      }
-
-      // Schedule next standard check (5 seconds when connected)
-      this.scheduleNextCheck(5000);
+      this.setState('CONNECTED');
       return true;
     } catch {
       this.consecutiveFailures += 1;
-      
-      if (this.state === 'STARTING') {
-        // Give initial grace period of 3 quick attempts before switching to RECONNECTING
-        if (this.consecutiveFailures >= 3) {
-          this.setState('RECONNECTING');
-        }
-      } else {
+
+      // Only alert if there are 3 consecutive failures (debounce false alarms)
+      if (this.consecutiveFailures >= 3) {
         this.setState('RECONNECTING');
       }
 
-      // Exponential backoff with random jitter (+/- 20%)
-      const backoffIdx = Math.min(this.consecutiveFailures - 1, this.backoffSchedule.length - 1);
-      const baseDelay = this.backoffSchedule[Math.max(0, backoffIdx)];
-      const jitter = (Math.random() * 0.4 - 0.2) * baseDelay;
-      const nextDelay = Math.max(1000, Math.round(baseDelay + jitter));
-
-      this.scheduleNextCheck(nextDelay);
+      // If backend is still starting up, retry with gentle backoff
+      if (this.state === 'STARTING' || this.state === 'RECONNECTING') {
+        const delay = Math.min(2000 * this.consecutiveFailures, 10000);
+        this.scheduleNextCheck(delay);
+      }
       return false;
+    }
+  }
+
+  /**
+   * Method C: Called when real requests succeed or fail to keep state in sync
+   */
+  public recordSuccess() {
+    this.consecutiveFailures = 0;
+    if (this.state !== 'CONNECTED') {
+      this.setState('CONNECTED');
+    }
+  }
+
+  public recordFailure() {
+    this.consecutiveFailures += 1;
+    if (this.consecutiveFailures >= 3 && this.state !== 'RECONNECTING') {
+      this.setState('RECONNECTING');
+      this.scheduleNextCheck(3000);
     }
   }
 
@@ -140,33 +180,6 @@ class ConnectionManager {
     this.pollTimer = setTimeout(() => {
       this.checkHealth();
     }, delayMs);
-  }
-
-  /**
-   * Decoupled background probe for subsystem dependencies (/api/ready)
-   */
-  private startReadinessPolling() {
-    const probeReady = async () => {
-      if (this.isDestroyed || this.state === 'RECONNECTING') return;
-      try {
-        const ready = await api.getReady();
-        this.readinessData = {
-          status: (ready.status as any) || 'ready',
-          subsystems: ready.subsystems || {},
-        };
-        if (this.state === 'CONNECTED' && ready.status === 'degraded') {
-          this.setState('DEGRADED');
-        } else if (this.state === 'DEGRADED' && ready.status === 'ready') {
-          this.setState('CONNECTED');
-        }
-      } catch {
-        // Readiness notice does not break localhost connection state
-      }
-    };
-
-    // Initial probe after 3 seconds, then every 20 seconds
-    setTimeout(probeReady, 3000);
-    this.readyTimer = setInterval(probeReady, 20000);
   }
 }
 

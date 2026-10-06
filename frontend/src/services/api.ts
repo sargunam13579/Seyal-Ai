@@ -438,7 +438,7 @@ export const api = {
       let fallbackText = "I am ready and listening. Please let me know what desktop task or question I can assist you with.";
       let isTask = false;
 
-      if (lower.includes("hello") || lower.includes("hi") || lower.includes("hey") || lower.includes("vanakkam") || lower.includes("jarvis")) {
+      if (lower.includes("hello") || lower.includes("hi") || lower.includes("hey") || lower.includes("vanakkam") || lower.includes("seyal")) {
         fallbackText = "Hello! I am Seyal AI, your autonomous desktop assistant. I am ready to converse and assist you with desktop tasks.";
       } else if (lower.includes("date") || lower.includes("today")) {
         fallbackText = `Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.`;
@@ -717,5 +717,81 @@ export const api = {
     const { data } = await apiClient.post('/tasks/emergency/stop', { reason });
     return data;
   },
+
+  async updateTaskPermission(taskId: string, action: 'grant' | 'deny'): Promise<any> {
+    const { data } = await apiClient.post(`/tasks/${taskId}/permission`, { action });
+    return data;
+  },
+
+  async classifyTask(instruction: string): Promise<any> {
+    const { data } = await apiClient.post('/tasks/classify', { instruction });
+    return data;
+  },
+
+  // User Knowledge & Rules Hub
+  async getUserHub(): Promise<{
+    user_knowledge: Record<string, string>;
+    one_time_reminders: any[];
+    standing_rules: Record<string, any>;
+  }> {
+    const { data } = await apiClient.get('/user-hub');
+    return data;
+  },
+
+  async setUserKnowledgeItem(key: string, value: string): Promise<Record<string, string>> {
+    const { data } = await apiClient.post('/user-hub/knowledge', { key, value });
+    return data;
+  },
+
+  async deleteUserKnowledgeItem(key: string): Promise<Record<string, string>> {
+    const { data } = await apiClient.delete(`/user-hub/knowledge/${encodeURIComponent(key)}`);
+    return data;
+  },
+
+  async addReminder(title: string, target_time?: string, notes?: string): Promise<any> {
+    const { data } = await apiClient.post('/user-hub/reminders', { title, target_time, notes });
+    return data;
+  },
+
+  async completeAndRemoveReminder(reminderId: string): Promise<any> {
+    const { data } = await apiClient.delete(`/user-hub/reminders/${encodeURIComponent(reminderId)}`);
+    return data;
+  },
+
+  async addOrUpdateStandingRule(rule: {
+    id: string;
+    title: string;
+    description?: string;
+    trigger_type?: string;
+    active?: boolean;
+  }): Promise<any> {
+    const { data } = await apiClient.post('/user-hub/standing-rules', rule);
+    return data;
+  },
+
+  async toggleStandingRule(ruleId: string, active?: boolean): Promise<any> {
+    const { data } = await apiClient.put(`/user-hub/standing-rules/${encodeURIComponent(ruleId)}/toggle`, {
+      active,
+    });
+    return data;
+  },
+
+  async deleteStandingRule(ruleId: string): Promise<any> {
+    const { data } = await apiClient.delete(`/user-hub/standing-rules/${encodeURIComponent(ruleId)}`);
+    return data;
+  },
+
+  async getWelcomeGreeting(userName: string = 'Friend'): Promise<string> {
+    try {
+      const { data } = await apiClient.get('/computer-use/welcome', {
+        params: { user_name: userName },
+      });
+      return data?.greeting || '';
+    } catch (err) {
+      console.warn('Failed to fetch dynamic welcome greeting:', err);
+      return '';
+    }
+  },
 };
+
 

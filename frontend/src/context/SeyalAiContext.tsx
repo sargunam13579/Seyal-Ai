@@ -29,7 +29,7 @@ export const getWelcomeGreetingText = (userName = 'User'): string => {
   return `Hey ${displayUser}! Welcome back. Naan ready. Sollunga, enna pannalam?`;
 };
 
-export const createWelcomeMessage = (userName = 'User', _assistantName = 'JARVIS'): MessageItem => {
+export const createWelcomeMessage = (userName = 'User', _assistantName = 'Seyal AI'): MessageItem => {
   return {
     id: 'welcome-message',
     role: 'assistant',
@@ -39,7 +39,7 @@ export const createWelcomeMessage = (userName = 'User', _assistantName = 'JARVIS
   };
 };
 
-interface NexusContextType {
+interface SeyalAiContextType {
   activeView: NavView;
   setActiveView: (view: NavView) => void;
   identity: IdentityResponse | null;
@@ -58,12 +58,8 @@ interface NexusContextType {
   setActiveConversationId: (id: string | null) => void;
   messages: MessageItem[];
   setMessages: React.Dispatch<React.SetStateAction<MessageItem[]>>;
-  simpleMessages: MessageItem[];
-  setSimpleMessages: React.Dispatch<React.SetStateAction<MessageItem[]>>;
   computerUseMessages: MessageItem[];
   setComputerUseMessages: React.Dispatch<React.SetStateAction<MessageItem[]>>;
-  simpleConversationId: string | null;
-  setSimpleConversationId: (id: string | null) => void;
   computerUseConversationId: string | null;
   setComputerUseConversationId: (id: string | null) => void;
   refreshState: () => Promise<void>;
@@ -77,8 +73,6 @@ interface NexusContextType {
   refreshConversations: () => void;
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
-  isSimpleSidebarCollapsed: boolean;
-  setIsSimpleSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
   isConvoSidebarCollapsed: boolean;
   setIsConvoSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
   isHeroLogoOpen: boolean;
@@ -98,9 +92,9 @@ interface NexusContextType {
   setUserProfileAvatar: (avatar: string | null) => void;
 }
 
-const NexusContext = createContext<NexusContextType | undefined>(undefined);
+const SeyalAiContext = createContext<SeyalAiContextType | undefined>(undefined);
 
-export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const SeyalAiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<NavView>('assistant');
   const [activeSettingsTab, setActiveSettingsTab] = useState<string>('general');
@@ -120,8 +114,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     saveRadialOrder(order);
   }, []);
 
-  // Independent sidebar collapse states: both default to OPEN (false)
-  const [isSimpleSidebarCollapsed, setIsSimpleSidebarCollapsed] = useState<boolean>(false);
+  // Convo sidebar collapse state: defaults to OPEN (false)
   const [isConvoSidebarCollapsed, setIsConvoSidebarCollapsed] = useState<boolean>(false);
 
   // Hero Logo Orb state: waits 1 second after app launch before opening
@@ -166,17 +159,13 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
 
 
-  // Clear any legacy persisted collapsed state so both always default to open
+  // Clear any legacy persisted collapsed state so it always defaults to open
   useEffect(() => {
     try {
-      localStorage.removeItem('nexus_sidebar_collapsed');
-      localStorage.removeItem('nexus_simple_sidebar_collapsed');
-      localStorage.removeItem('nexus_convo_sidebar_collapsed');
+      localStorage.removeItem('seyal_sidebar_collapsed');
+      localStorage.removeItem('seyal_simple_sidebar_collapsed');
+      localStorage.removeItem('seyal_convo_sidebar_collapsed');
     } catch { }
-  }, []);
-
-  const handleSetIsSimpleSidebarCollapsed = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
-    setIsSimpleSidebarCollapsed((prev) => (typeof val === 'function' ? val(prev) : val));
   }, []);
 
   const handleSetIsConvoSidebarCollapsed = useCallback((val: boolean | ((prev: boolean) => boolean)) => {
@@ -207,34 +196,23 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [readiness, setReadiness] = useState<ReadinessInfo | null>(connectionManager.getReadiness());
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Separate conversation states for Simple Chatbot vs Conversational Computer-Use Agent
-  const [simpleConversationId, setSimpleConversationId] = useState<string | null>(null);
+  // Conversational Computer-Use Agent conversation states
   const [computerUseConversationId, setComputerUseConversationId] = useState<string | null>(null);
-
-  const [simpleMessages, setSimpleMessages] = useState<MessageItem[]>([]);
   const [computerUseMessages, setComputerUseMessages] = useState<MessageItem[]>([]);
 
-  const activeConversationId = isComputerUseActive ? computerUseConversationId : simpleConversationId;
+  const activeConversationId = computerUseConversationId;
   const setActiveConversationId = (id: string | null) => {
-    if (isComputerUseActive) {
-      setComputerUseConversationId(id);
-    } else {
-      setSimpleConversationId(id);
-    }
+    setComputerUseConversationId(id);
   };
 
-  const messages = isComputerUseActive ? computerUseMessages : simpleMessages;
+  const messages = computerUseMessages;
   const setMessages: React.Dispatch<React.SetStateAction<MessageItem[]>> = (val) => {
-    if (isComputerUseActive) {
-      setComputerUseMessages(val);
-    } else {
-      setSimpleMessages(val);
-    }
+    setComputerUseMessages(val);
   };
 
   const [userProfileAvatar, setUserProfileAvatar] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('nexus_user_avatar') || null;
+      return localStorage.getItem('seyal_user_avatar') || null;
     } catch {
       return null;
     }
@@ -243,16 +221,16 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const handleAvatarUpdate = () => {
       try {
-        const stored = localStorage.getItem('nexus_user_avatar') || null;
+        const stored = localStorage.getItem('seyal_user_avatar') || null;
         setUserProfileAvatar(stored);
       } catch {
         // ignore
       }
     };
-    window.addEventListener('nexus_avatar_updated', handleAvatarUpdate);
+    window.addEventListener('seyal_avatar_updated', handleAvatarUpdate);
     window.addEventListener('storage', handleAvatarUpdate);
     return () => {
-      window.removeEventListener('nexus_avatar_updated', handleAvatarUpdate);
+      window.removeEventListener('seyal_avatar_updated', handleAvatarUpdate);
       window.removeEventListener('storage', handleAvatarUpdate);
     };
   }, []);
@@ -268,7 +246,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActivities((prev) => [newEvent, ...prev.slice(0, 49)]);
   }, []);
 
-  const isBackendConnected = connectionState === 'CONNECTED' || connectionState === 'DEGRADED';
+  const isBackendConnected = connectionState === 'CONNECTED' || connectionState === 'DEGRADED' || connectionState === 'OFFLINE';
 
   useEffect(() => {
     connectionManager.start();
@@ -416,7 +394,7 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   return (
-    <NexusContext.Provider
+    <SeyalAiContext.Provider
       value={{
         activeView,
         setActiveView,
@@ -436,12 +414,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setActiveConversationId,
         messages,
         setMessages,
-        simpleMessages,
-        setSimpleMessages,
         computerUseMessages,
         setComputerUseMessages,
-        simpleConversationId,
-        setSimpleConversationId,
         computerUseConversationId,
         setComputerUseConversationId,
         refreshState,
@@ -453,10 +427,8 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resetChatContext,
         conversationsVersion,
         refreshConversations,
-        isSidebarCollapsed: isComputerUseActive ? isConvoSidebarCollapsed : isSimpleSidebarCollapsed,
-        setIsSidebarCollapsed: isComputerUseActive ? handleSetIsConvoSidebarCollapsed : handleSetIsSimpleSidebarCollapsed,
-        isSimpleSidebarCollapsed,
-        setIsSimpleSidebarCollapsed: handleSetIsSimpleSidebarCollapsed,
+        isSidebarCollapsed: isConvoSidebarCollapsed,
+        setIsSidebarCollapsed: handleSetIsConvoSidebarCollapsed,
         isConvoSidebarCollapsed,
         setIsConvoSidebarCollapsed: handleSetIsConvoSidebarCollapsed,
         isHeroLogoOpen,
@@ -477,14 +449,14 @@ export const NexusProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }}
     >
       {children}
-    </NexusContext.Provider>
+    </SeyalAiContext.Provider>
   );
 };
 
-export const useNexus = (): NexusContextType => {
-  const context = useContext(NexusContext);
+export const useSeyalAi = (): SeyalAiContextType => {
+  const context = useContext(SeyalAiContext);
   if (!context) {
-    throw new Error('useNexus must be used within a NexusProvider');
+    throw new Error('useSeyalAi must be used within a SeyalAiProvider');
   }
   return context;
 };

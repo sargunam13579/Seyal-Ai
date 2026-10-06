@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
-import { NexusProvider, useNexus } from './context/NexusContext';
+import { SeyalAiProvider, useSeyalAi } from './context/SeyalAiContext';
 import { VoiceProvider, useVoice } from './context/VoiceContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
@@ -35,7 +35,7 @@ const MainContent: React.FC = () => {
     isHeroLogoOpen,
     isHeroLogoClosing,
     heroLogoTrigger,
-  } = useNexus();
+  } = useSeyalAi();
   const {
     cancelCurrentSpeech,
     getNextTurnId,
@@ -211,14 +211,14 @@ const MainContent: React.FC = () => {
       {/* Top Header HUD - Always visible for Seyal AI Conversational Computer-Use Agent */}
       <Header />
 
-      {/* Sleek connection state HUD — only shows if actively reconnecting */}
-      {connectionState === 'RECONNECTING' && (
-        <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-xs px-6 py-1.5 flex items-center justify-between font-tech shrink-0 transition-all duration-300">
+      {/* Method A & B: Sleek ChatGPT-style network indicator — shows ONLY if hardware is literally offline */}
+      {connectionState === 'OFFLINE' && (
+        <div className="bg-slate-900/90 border-b border-slate-800 text-slate-400 text-xs px-6 py-1.5 flex items-center justify-between font-mono shrink-0 transition-all duration-300 backdrop-blur-md">
           <span className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping inline-block" />
-            Connecting to AI Engine... (automatic background recovery active)
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block" />
+            Internet disconnected — local computer actions available, cloud intelligence paused
           </span>
-          <span className="font-mono text-[11px] opacity-80">Auto-Reconnecting</span>
+          <span className="text-[11px] opacity-70">Offline</span>
         </div>
       )}
 
@@ -337,11 +337,11 @@ const AuthenticatedApp: React.FC = () => {
   }
 
   return (
-    <NexusProvider>
+    <SeyalAiProvider>
       <VoiceProvider>
         <MainContent />
       </VoiceProvider>
-    </NexusProvider>
+    </SeyalAiProvider>
   );
 };
 

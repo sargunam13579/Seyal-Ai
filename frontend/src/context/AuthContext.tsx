@@ -71,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           (k.startsWith('sb-') ||
             k.includes('supabase') ||
             k.includes('auth-token') ||
-            k.startsWith('nexus_') ||
+            k.startsWith('seyal_') ||
             k.startsWith('seyal_'))
         ) {
           keysToRemove.push(k);
