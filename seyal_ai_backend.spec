@@ -1,16 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec file for NEXUS backend bundling
-# Builds a single-file Windows exe: nexus_backend.exe
+# PyInstaller spec file for Seyal AI backend bundling
+# Builds a single-file Windows exe: seyal_ai_backend.exe
 
 import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 # Collect all data/binaries from google-genai and uvicorn
 datas = [
-    # Bundle the NEXUS config TOML
+    # Bundle the Seyal AI config TOML
     ('config/default.toml', 'config'),
-    # Bundle all nexus source code as a package
-    ('src/nexus', 'nexus'),
+    # Bundle all seyal_ai source code as a package
+    ('src/seyal_ai', 'seyal_ai'),
 ]
 
 binaries = []
@@ -40,15 +40,15 @@ hiddenimports = [
     'dotenv',
     'PIL',
     'PIL.Image',
-    'nexus.main',
-    'nexus.api.app',
-    'nexus.api.routes',
-    'nexus.core.config',
-    'nexus.database.engine',
+    'seyal_ai.main',
+    'seyal_ai.api.app',
+    'seyal_ai.api.routes',
+    'seyal_ai.core.config',
+    'seyal_ai.database.engine',
 ]
 
-# Collect all submodules from nexus packages
-for pkg in ['nexus', 'uvicorn', 'fastapi', 'starlette']:
+# Collect all submodules from seyal_ai packages
+for pkg in ['seyal_ai', 'uvicorn', 'fastapi', 'starlette']:
     hiddenimports += collect_submodules(pkg)
 
 # Collect google-genai data
@@ -74,7 +74,7 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    ['src/nexus/main.py'],
+    ['src/seyal_ai/main.py'],
     pathex=['src'],
     binaries=binaries,
     datas=datas,
@@ -94,7 +94,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='nexus_backend',
+    name='seyal_ai_backend',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

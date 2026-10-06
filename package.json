@@ -1,12 +1,12 @@
 {
-  "name": "nexus",
+  "name": "seyal-ai",
   "version": "0.1.7",
   "description": "Seyal AI — Autonomous Agentic Desktop Application",
   "author": "SARGUNAM K",
   "main": "electron/main.js",
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
-    "dev:backend": ".\\.venv\\Scripts\\python.exe -m nexus.main --mode api",
+    "dev:backend": ".\\.venv\\Scripts\\python.exe -m seyal_ai.main --mode api",
     "dev": "concurrently -n \"frontend,backend,electron\" -c \"cyan,green,blue\" \"npm run dev:frontend\" \"npm run dev:backend\" \"wait-on http://127.0.0.1:5173 http-get://127.0.0.1:8000/api/health -t 60000 && electron .\"",
     "build:frontend": "npm --prefix frontend run build",
     "package": "npm run build:frontend && electron-builder build --win"
@@ -18,7 +18,7 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.nexus.ai.desktop",
+    "appId": "com.seyalai.desktop",
     "productName": "Seyal AI",
     "directories": {
       "output": "dist"
@@ -31,8 +31,8 @@
     ],
     "extraResources": [
       {
-        "from": "dist_backend/nexus_backend.exe",
-        "to": "backend/nexus_backend.exe"
+        "from": "dist_backend/seyal_ai_backend.exe",
+        "to": "backend/seyal_ai_backend.exe"
       },
       {
         "from": ".env",
@@ -53,8 +53,8 @@
     "appx": {
       "publisherDisplayName": "SARGUNAM K",
       "publisher": "CN=2FDF5732-8711-4493-BFEE-182F498E2D65",
-      "identityName": "NexusAI.SeyalAI",
-      "applicationId": "NexusAI"
+      "identityName": "SeyalAI",
+      "applicationId": "SeyalAI"
     }
   }
 }

@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nexus-agent"
+name = "seyal-ai"
 version = "0.1.0"
-description = "NEXUS — Voice-first, cross-device personal AI agent for accessibility"
+description = "Seyal AI — Voice-first, cross-device personal AI agent for accessibility"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
-authors = [{ name = "NEXUS Team" }]
+authors = [{ name = "Seyal AI Team" }]
 
 dependencies = [
     # Core
@@ -84,10 +84,10 @@ dev = [
 ]
 
 [project.scripts]
-nexus = "nexus.main:main"
+seyal-ai = "seyal_ai.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nexus"]
+packages = ["src/seyal_ai"]
 
 [tool.ruff]
 target-version = "py311"
