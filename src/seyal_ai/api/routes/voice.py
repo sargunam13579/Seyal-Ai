@@ -1,0 +1,425 @@
+"""
+Seyal AI API — Voice Routes.
+
+REST endpoints for voice transcription, synthesis, and configuration.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+import json
+import numpy as np
+from fastapi.responses import Response
+
+from seyal_ai.api.schemas import (
+    VoiceConfigResponse,
+    VoiceConfigUpdate,
+    VoiceStatusResponse,
+    VoiceSynthesizeRequest,
+    VoiceTranscribeResponse,
+)
+from seyal_ai.utils.logging import get_logger
+from seyal_ai.voice.stt import STTEngine, STTError
+from seyal_ai.voice.tts import TTSError
+
+log = get_logger("api.voice")
+
+router = APIRouter(prefix="/voice", tags=["voice"])
+
+# Module-level STT engine cache to avoid re-init overhead per request
+_stt_engine_cache: dict[str, STTEngine] = {}
+
+
+def _get_cached_stt_engine(provider_name: str, language: str) -> STTEngine:
+    """Return a cached STTEngine, creating it only once per provider+language combo."""
+    cache_key = f"{provider_name}:{language}"
+    if cache_key not in _stt_engine_cache:
+        _stt_engine_cache[cache_key] = STTEngine(
+            provider_name=provider_name,
+            language=language,
+        )
+    return _stt_engine_cache[cache_key]
+
+
+def _get_brain(request: Request):
+    """Get the SeyalAiBrain from app state."""
+    return request.app.state.brain
+
+
+# ---------------------------------------------------------------------------
+# Transcription
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/transcribe",
+    response_model=VoiceTranscribeResponse,
+    summary="Transcribe audio to text",
+)
+async def transcribe_audio(
+    request: Request,
+    audio: UploadFile = File(..., description="Audio file (WAV, 16kHz mono preferred)"),
+    language: str = "auto",
+) -> VoiceTranscribeResponse:
+    """
+    Upload an audio file and get the transcribed text.
+
+    Supports WAV format (16kHz, 16-bit, mono recommended).
+    """
+    try:
+        from seyal_ai.voice.audio_io import wav_bytes_to_audio
+
+        settings = request.app.state.settings
+
+        # Read audio file
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio file")
+
+        # Convert WAV to numpy array
+        try:
+            audio_data, sample_rate = wav_bytes_to_audio(audio_bytes)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid audio format. Please upload a WAV file.",
+            ) from e
+
+        # Transcribe using cached STT engine with multilingual language detection
+        stt = _get_cached_stt_engine(settings.voice.stt_provider, language)
+        trans_res = await stt.transcribe_with_language(audio_data, sample_rate, language)
+
+        return VoiceTranscribeResponse(
+            text=trans_res.text,
+            language=trans_res.language,
+            provider=stt.provider_name,
+            success=True,
+        )
+
+    except STTError as e:
+        return VoiceTranscribeResponse(
+            text="",
+            language=language,
+            success=False,
+            error=str(e),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("Transcription error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Synthesis
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/synthesize",
+    summary="Synthesize text to speech audio",
+)
+async def synthesize_speech(
+    request: Request,
+    body: VoiceSynthesizeRequest,
+) -> Response:
+    """
+    Convert text to speech audio.
+
+    Returns audio bytes (MP3 for Edge TTS, WAV for pyttsx3).
+    """
+    try:
+        from seyal_ai.voice.tts import TTSEngine
+
+        settings = request.app.state.settings
+
+        tts = TTSEngine(
+            provider_name=settings.voice.tts_provider,
+            voice=body.voice or settings.voice.tts.voice,
+            speed=body.speed or settings.voice.tts.speed,
+        )
+
+        audio_bytes = await tts.synthesize(body.text)
+
+        # Determine content type based on provider
+        content_type = "audio/mpeg" if settings.voice.tts_provider == "edge" else "audio/wav"
+
+        return Response(
+            content=audio_bytes,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": "attachment; filename=speech.mp3",
+            },
+        )
+
+    except TTSError as e:
+        raise HTTPException(status_code=500, detail=f"Synthesis failed: {e}") from e
+    except Exception as e:
+        log.error("Synthesis error: %s", e)
+        raise HTTPException(status_code=500, detail=f"Synthesis failed: {e}") from e
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/config",
+    response_model=VoiceConfigResponse,
+    summary="Get voice configuration",
+)
+async def get_voice_config(request: Request) -> VoiceConfigResponse:
+    """Get the current voice configuration and pipeline status."""
+    brain = _get_brain(request)
+    settings = request.app.state.settings
+
+    if brain.voice_pipeline is not None:
+        status = brain.voice_pipeline.get_status()
+        return VoiceConfigResponse(
+            enabled=settings.voice.enabled,
+            running=status["running"],
+            state=status["state"],
+            interaction_mode=status["interaction_mode"],
+            language=status["language"],
+            stt_provider=status["stt_provider"],
+            tts_provider=status["tts_provider"],
+            tts_voice=status["tts_voice"],
+            tts_speed=status["tts_speed"],
+            interrupt_enabled=status["interrupt_enabled"],
+            vad_uses_silero=status["vad_uses_silero"],
+        )
+
+    return VoiceConfigResponse(
+        enabled=settings.voice.enabled,
+        running=False,
+        state="stopped",
+        interaction_mode=settings.voice.interaction_mode,
+        language=settings.voice.language,
+        stt_provider=settings.voice.stt_provider,
+        tts_provider=settings.voice.tts_provider,
+        tts_voice=settings.voice.tts.voice,
+        tts_speed=settings.voice.tts.speed,
+        interrupt_enabled=settings.voice.interrupt_enabled,
+    )
+
+
+@router.put(
+    "/config",
+    response_model=VoiceConfigResponse,
+    summary="Update voice configuration",
+)
+async def update_voice_config(
+    request: Request,
+    body: VoiceConfigUpdate,
+) -> VoiceConfigResponse:
+    """Update voice configuration (applied to the running pipeline if active)."""
+    brain = _get_brain(request)
+
+    if brain.voice_pipeline is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Voice pipeline is not running. Start it first.",
+        )
+
+    pipeline = brain.voice_pipeline
+
+    if body.interaction_mode is not None:
+        try:
+            pipeline.interaction_mode = body.interaction_mode
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid interaction mode: {body.interaction_mode}",
+            ) from e
+
+    if body.tts_voice is not None:
+        pipeline.tts_engine.voice = body.tts_voice
+
+    if body.tts_speed is not None:
+        pipeline.tts_engine.speed = body.tts_speed
+
+    if body.language is not None:
+        pipeline.language = body.language
+
+    return await get_voice_config(request)
+
+
+@router.get(
+    "/status",
+    response_model=VoiceStatusResponse,
+    summary="Get detailed voice status with available voices",
+)
+async def get_voice_status(request: Request) -> VoiceStatusResponse:
+    """Get detailed voice pipeline status including available voices."""
+    config = await get_voice_config(request)
+
+    # Get available voices
+    voices: list[dict[str, str]] = []
+    try:
+        from seyal_ai.voice.tts import TTSEngine
+
+        settings = request.app.state.settings
+        tts = TTSEngine(provider_name=settings.voice.tts_provider)
+        voices = await tts.list_voices()
+    except Exception as e:
+        log.debug("Could not list voices: %s", e)
+
+    return VoiceStatusResponse(
+        pipeline=config,
+        available_voices=voices[:20],  # Limit to 20 voices
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Control
+# ---------------------------------------------------------------------------
+
+
+@router.post("/start", summary="Start the voice pipeline")
+async def start_voice(request: Request) -> dict:
+    """Start the voice pipeline for real-time voice interaction."""
+    brain = _get_brain(request)
+
+    if brain.is_voice_active:
+        return {"status": "already_running", "message": "Voice pipeline is already running"}
+
+    try:
+        await brain.start_voice()
+        return {"status": "started", "message": "Voice pipeline started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start voice: {e}") from e
+
+
+@router.post("/stop", summary="Stop the voice pipeline")
+async def stop_voice(request: Request) -> dict:
+    """Stop the voice pipeline."""
+    brain = _get_brain(request)
+
+    if not brain.is_voice_active:
+        return {"status": "already_stopped", "message": "Voice pipeline is not running"}
+
+    await brain.stop_voice()
+    return {"status": "stopped", "message": "Voice pipeline stopped"}
+
+
+# ---------------------------------------------------------------------------
+# Realtime WebSocket Audio Streaming & Instant Barge-In
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/ws")
+async def voice_websocket_stream(websocket: WebSocket) -> None:
+    """
+    Bidirectional Real-Time Voice WebSocket.
+
+    - Receives streaming 16kHz 16-bit Mono PCM audio chunks directly from client mic.
+    - Runs Voice Activity Detection (Silero VAD / Energy filter).
+    - Emits instant 'barge_in' event if user speaks while assistant is speaking.
+    - Performs fast STT transcription on silence boundary and emits 'transcript' event.
+    """
+    await websocket.accept()
+    log.info("Client connected to Realtime Voice WebSocket (/voice/ws)")
+
+    from seyal_ai.voice.vad import VADState, VoiceActivityDetector
+
+    vad = VoiceActivityDetector(sample_rate=16000, silence_threshold_ms=1800, min_speech_ms=250, energy_threshold=100)
+    vad.reset()
+
+    language = "auto"
+    is_speaking_turn = False
+    speech_chunks: list[np.ndarray] = []
+
+    try:
+        # Acknowledge connection
+        await websocket.send_text(json.dumps({
+            "event": "connected",
+            "message": "Seyal AI Realtime Voice Connected",
+            "sample_rate": 16000,
+        }))
+
+        while True:
+            message = await websocket.receive()
+            if "text" in message and message["text"]:
+                try:
+                    payload = json.loads(message["text"])
+                    msg_type = payload.get("type", "")
+
+                    if msg_type == "config":
+                        if "language" in payload:
+                            language = payload["language"]
+                            log.info("Realtime Voice language updated to: %s", language)
+                    elif msg_type == "assistant_speaking":
+                        is_speaking_turn = payload.get("status", False)
+                        if is_speaking_turn:
+                            speech_chunks.clear()
+                    elif msg_type == "ping":
+                        await websocket.send_text(json.dumps({"event": "pong"}))
+                except Exception as parse_err:
+                    log.debug("WebSocket text message parse error: %s", parse_err)
+
+            elif "bytes" in message and message["bytes"]:
+                raw_bytes = message["bytes"]
+                if len(raw_bytes) == 0:
+                    continue
+
+                # Discard microphone input while assistant is speaking or preparing speech (prevents self-hearing echo)
+                if is_speaking_turn:
+                    speech_chunks.clear()
+                    continue
+
+                # Interpret bytes as 16-bit signed PCM
+                chunk_int16 = np.frombuffer(raw_bytes, dtype=np.int16)
+                vad_state = vad.process_chunk(chunk_int16)
+
+                if vad_state == VADState.SPEECH:
+                    speech_chunks.append(chunk_int16)
+
+                elif vad_state == VADState.SILENCE and speech_chunks:
+                    # Speech segment completed: transcribe
+                    full_audio = np.concatenate(speech_chunks)
+                    speech_chunks = []
+                    vad.reset()
+
+                    # Minimum duration check (~0.25 seconds)
+                    if len(full_audio) >= 4000:
+                        try:
+                            # Use cached Multilingual STT engine
+                            stt_prov = "multilingual_gemini"
+                            try:
+                                settings = getattr(websocket.app.state, "settings", None)
+                                if settings and settings.voice.stt_provider:
+                                    stt_prov = settings.voice.stt_provider
+                            except Exception:
+                                pass
+
+                            stt = _get_cached_stt_engine(stt_prov, language)
+                            trans_res = await stt.transcribe_with_language(full_audio, 16000, language)
+                            if trans_res.text and trans_res.text.strip():
+                                await websocket.send_text(json.dumps({
+                                    "event": "transcript",
+                                    "text": trans_res.text.strip(),
+                                    "language": trans_res.language,
+                                }))
+                            else:
+                                await websocket.send_text(json.dumps({
+                                    "event": "stt_empty",
+                                    "message": "Speech could not be recognized",
+                                    "language": language,
+                                }))
+                        except Exception as stt_err:
+                            log.debug("Realtime STT transcribe notice: %s", stt_err)
+                            try:
+                                await websocket.send_text(json.dumps({
+                                    "event": "stt_error",
+                                    "error": str(stt_err),
+                                    "language": language,
+                                }))
+                            except Exception:
+                                pass
+
+    except WebSocketDisconnect:
+        log.info("Client disconnected from Realtime Voice WebSocket")
+    except Exception as e:
+        log.error("Realtime Voice WebSocket error: %s", e)
+

@@ -1,3 +1,0 @@
-"""
-NEXUS Services Package.
-"""
