@@ -359,7 +359,7 @@ export const PermissionsTab: React.FC = () => {
           <span>Capability Permissions</span>
         </h2>
         <p className="text-xs text-slate-400 mt-0.5">
-          Configure hardware access, autonomous system inputs, and security execution scopes for NEXUS agent.
+          Configure hardware access, autonomous system inputs, and security execution scopes for Seyal AI agent.
         </p>
       </div>
 

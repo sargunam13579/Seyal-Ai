@@ -9,7 +9,7 @@ import {
   Move,
   Info,
 } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import appLogo from '../../assets/app-logo.png';
 import {
   RADIAL_ACTIONS_CATALOG,
@@ -18,7 +18,7 @@ import {
 } from '../../config/radialActionsConfig';
 
 export const FrequentTaskShortcutsManager: React.FC = () => {
-  const { radialButtonOrder, setRadialButtonOrder, addActivity } = useNexus();
+  const { radialButtonOrder, setRadialButtonOrder, addActivity } = useSeyalAi();
 
   // Local editing layout state
   const [isEditing, setIsEditing] = useState<boolean>(false);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Power, Activity } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useVoice } from '../../context/VoiceContext';
 import { SoundWaveVisualizer } from '../common/SoundWaveVisualizer';
 import appLogo from '../../assets/app-logo.png';
@@ -16,7 +16,7 @@ export const Header: React.FC = () => {
     isHeroLogoClosing,
     setActiveView,
     activeView,
-  } = useNexus();
+  } = useSeyalAi();
   const { voiceState } = useVoice();
   const [timeStr, setTimeStr] = useState<string>('');
   const [dateStr, setDateStr] = useState<string>('');

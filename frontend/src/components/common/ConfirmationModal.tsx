@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle, XCircle, ShieldAlert } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 
 export const ConfirmationModal: React.FC = () => {
-  const { pendingConfirmationPrompt, confirmAction, cancelPendingConfirmation } = useNexus();
+  const { pendingConfirmationPrompt, confirmAction, cancelPendingConfirmation } = useSeyalAi();
   const [isProcessing, setIsProcessing] = useState(false);
 
   if (!pendingConfirmationPrompt) return null;

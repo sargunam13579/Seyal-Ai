@@ -14,14 +14,14 @@ import {
   HardDrive,
   Monitor,
 } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { GlassCard } from '../common/GlassCard';
 import { StatusBadge } from '../common/StatusBadge';
 import { api } from '../../services/api';
 import type { LaptopToolSchema, ToolExecutionResponse } from '../../types';
 
 export const SystemControlView: React.FC = () => {
-  const { laptopStatus, refreshState, addActivity } = useNexus();
+  const { laptopStatus, refreshState, addActivity } = useSeyalAi();
   const [tools, setTools] = useState<LaptopToolSchema[]>([]);
   const [selectedTool, setSelectedTool] = useState<string>('get_system_info');
   const [toolParams, setToolParams] = useState<string>('{}');

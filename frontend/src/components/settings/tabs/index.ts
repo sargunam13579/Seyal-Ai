@@ -5,6 +5,7 @@ export { ComputerAwarenessTab } from './ComputerAwarenessTab';
 export { PermissionsTab } from './PermissionsTab';
 export { NotificationsTab } from './NotificationsTab';
 export { PersonalizationTab } from './PersonalizationTab';
+export { UserKnowledgeTab } from './UserKnowledgeTab';
 export { VoiceTab } from './VoiceTab';
 export { AgentTaskManagerTab } from './AgentTaskManagerTab';
 export { SafetyTab } from './SafetyTab';

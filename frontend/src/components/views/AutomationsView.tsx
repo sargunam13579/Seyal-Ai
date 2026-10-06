@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { Cpu, Play, ArrowRight, Sparkles, Layers } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { api } from '../../services/api';
 
 export const AutomationsView: React.FC = () => {
-  const { addActivity } = useNexus();
+  const { addActivity } = useSeyalAi();
   const [goalText, setGoalText] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string[] | null>(null);

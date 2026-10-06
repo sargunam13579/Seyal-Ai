@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { User, Save, Shield } from 'lucide-react';
-import { useNexus } from '../../../context/NexusContext';
+import { useSeyalAi } from '../../../context/SeyalAiContext';
 import { api } from '../../../services/api';
 
 export const AccountTab: React.FC = () => {
-  const { identity, refreshState, addActivity } = useNexus();
+  const { identity, refreshState, addActivity } = useSeyalAi();
 
   // User profile details state
   const [userNameInput, setUserNameInput] = useState(identity?.user_name || '');

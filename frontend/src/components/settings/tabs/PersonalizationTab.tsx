@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Sliders, Mic, Plus, Trash2 } from 'lucide-react';
-import { useNexus } from '../../../context/NexusContext';
+import { useSeyalAi } from '../../../context/SeyalAiContext';
 import { api } from '../../../services/api';
 import type { VoiceStatusResponse } from '../../../types';
 import { FrequentTaskShortcutsManager } from '../FrequentTaskShortcutsManager';
 
 export const PersonalizationTab: React.FC = () => {
-  const { identity, refreshState, addActivity } = useNexus();
+  const { identity, refreshState, addActivity } = useSeyalAi();
 
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatusResponse | null>(null);
   const [voicePipelineActive, setVoicePipelineActive] = useState(false);
@@ -87,7 +87,7 @@ export const PersonalizationTab: React.FC = () => {
           <div className="flex justify-between text-xs">
             <span className="text-slate-400">Primary Wake Word:</span>
             <span className="font-mono text-cyan-300 font-bold">
-              "{identity?.wake_word || 'hey nexus'}"
+              "{identity?.wake_word || 'hey seyal'}"
             </span>
           </div>
           <div className="flex justify-between text-xs">

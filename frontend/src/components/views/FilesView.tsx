@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { FolderOpen, Search, FileText } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { api } from '../../services/api';
 
 export const FilesView: React.FC = () => {
-  const { addActivity } = useNexus();
+  const { addActivity } = useSeyalAi();
   const [searchPattern, setSearchPattern] = useState('');
   const [filePath, setFilePath] = useState('~');
   const [fileContent, setFileContent] = useState<string | null>(null);

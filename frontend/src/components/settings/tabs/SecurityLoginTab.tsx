@@ -27,7 +27,7 @@ const defaultSecuritySettings: SecuritySettings = {
 export const SecurityLoginTab: React.FC = () => {
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(() => {
     try {
-      const saved = localStorage.getItem('nexus_security_config');
+      const saved = localStorage.getItem('seyal_security_config');
       return saved ? { ...defaultSecuritySettings, ...JSON.parse(saved) } : defaultSecuritySettings;
     } catch {
       return defaultSecuritySettings;
@@ -41,7 +41,7 @@ export const SecurityLoginTab: React.FC = () => {
     setSecuritySettings((prev) => {
       const updated = { ...prev, [key]: val };
       try {
-        localStorage.setItem('nexus_security_config', JSON.stringify(updated));
+        localStorage.setItem('seyal_security_config', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }
@@ -101,7 +101,7 @@ export const SecurityLoginTab: React.FC = () => {
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-slate-100">Device Access & Session Lock</h3>
-                <p className="text-[11px] text-slate-400">Require master authentication to unlock NEXUS OS interface</p>
+                <p className="text-[11px] text-slate-400">Require master authentication to unlock Seyal AI interface</p>
               </div>
             </div>
           </div>

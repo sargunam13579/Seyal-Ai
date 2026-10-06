@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { Laptop, RefreshCw, ShieldCheck, Wifi } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
 import { StatusBadge } from '../common/StatusBadge';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 
 export const DevicesView: React.FC = () => {
-  const { laptopStatus, refreshState } = useNexus();
+  const { laptopStatus, refreshState } = useSeyalAi();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {

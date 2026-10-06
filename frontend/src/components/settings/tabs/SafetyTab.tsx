@@ -30,7 +30,7 @@ const defaultSafetySettings: SafetySettings = {
 export const SafetyTab: React.FC = () => {
   const [safetySettings, setSafetySettings] = useState<SafetySettings>(() => {
     try {
-      const saved = localStorage.getItem('nexus_safety_config');
+      const saved = localStorage.getItem('seyal_safety_config');
       return saved ? { ...defaultSafetySettings, ...JSON.parse(saved) } : defaultSafetySettings;
     } catch {
       return defaultSafetySettings;
@@ -44,7 +44,7 @@ export const SafetyTab: React.FC = () => {
     setSafetySettings((prev) => {
       const updated = { ...prev, [key]: val };
       try {
-        localStorage.setItem('nexus_safety_config', JSON.stringify(updated));
+        localStorage.setItem('seyal_safety_config', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }

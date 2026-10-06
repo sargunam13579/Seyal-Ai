@@ -12,18 +12,28 @@ import {
   ChevronRight,
   Loader2,
 } from 'lucide-react';
-import { useNexus } from '../../../context/NexusContext';
+import { useSeyalAi } from '../../../context/SeyalAiContext';
 import { api } from '../../../services/api';
 
 export const AgentTaskManagerTab: React.FC = () => {
-  const { activities, addActivity } = useNexus();
+  const { activities, addActivity } = useSeyalAi();
 
   const [agentTasks, setAgentTasks] = useState<any[]>([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState<boolean>(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState<boolean>(false);
   const [taskFilter, setTaskFilter] = useState<'all' | 'completed' | 'in_progress' | 'pending' | 'cancelled' | 'failed'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'immediate' | 'scheduled' | 'continuous' | 'conditional'>('all');
   const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState<boolean>(false);
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+
+  const handlePermissionAction = async (taskId: string, action: 'grant' | 'deny') => {
+    try {
+      await api.updateTaskPermission(taskId, action);
+      await loadAgentTasks(true);
+    } catch (err: any) {
+      alert(`Permission action failed: ${err.message}`);
+    }
+  };
 
   const loadAgentTasks = async (showRefreshSpinner: boolean = false) => {
     if (showRefreshSpinner) setIsRefreshingTasks(true);
@@ -347,6 +357,31 @@ export const AgentTaskManagerTab: React.FC = () => {
           </div>
         </div>
 
+        {/* 2.5 Task Type Filter Tags (Type 1-4 & Notify) */}
+        <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
+          <span className="text-[11px] font-semibold text-slate-400 mr-1">Task Type:</span>
+          {[
+            { id: 'all', label: 'All Types' },
+            { id: 'immediate', label: '⚡ Type 1: Immediate' },
+            { id: 'scheduled', label: '⏰ Type 2: Scheduled' },
+            { id: 'continuous', label: '🔄 Type 3: Continuous' },
+            { id: 'conditional', label: '🔀 Type 4: Conditional' },
+          ].map((tf) => (
+            <button
+              key={tf.id}
+              type="button"
+              onClick={() => setTypeFilter(tf.id as any)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+                typeFilter === tf.id
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold'
+                  : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
+              }`}
+            >
+              {tf.label}
+            </button>
+          ))}
+        </div>
+
         {/* 3. Task Cards List */}
         <div className="space-y-3">
           {isLoadingTasks ? (
@@ -357,9 +392,13 @@ export const AgentTaskManagerTab: React.FC = () => {
           ) : agentTasks.filter((t) => {
               if (taskFilter === 'completed' && t.status !== 'completed') return false;
               if (taskFilter === 'in_progress' && !(t.status === 'in_progress' || t.status === 'running')) return false;
-              if (taskFilter === 'pending' && !(t.status === 'pending' || t.status === 'planning' || t.status === 'paused')) return false;
+              if (taskFilter === 'pending' && !(t.status === 'pending' || t.status === 'planning' || t.status === 'paused' || t.status === 'waiting_permission')) return false;
               if (taskFilter === 'cancelled' && t.status !== 'cancelled') return false;
               if (taskFilter === 'failed' && t.status !== 'failed') return false;
+              if (typeFilter !== 'all') {
+                const tt = (t.task_type || t.spec?.task_type || 'immediate').toLowerCase();
+                if (tt !== typeFilter) return false;
+              }
               return true;
             }).length === 0 ? (
             <div className="py-14 px-6 text-center rounded-2xl bg-slate-900/40 border border-slate-800/80 flex flex-col items-center justify-center gap-3">
@@ -380,16 +419,21 @@ export const AgentTaskManagerTab: React.FC = () => {
               .filter((t) => {
                 if (taskFilter === 'completed' && t.status !== 'completed') return false;
                 if (taskFilter === 'in_progress' && !(t.status === 'in_progress' || t.status === 'running')) return false;
-                if (taskFilter === 'pending' && !(t.status === 'pending' || t.status === 'planning' || t.status === 'paused')) return false;
+                if (taskFilter === 'pending' && !(t.status === 'pending' || t.status === 'planning' || t.status === 'paused' || t.status === 'waiting_permission')) return false;
                 if (taskFilter === 'cancelled' && t.status !== 'cancelled') return false;
                 if (taskFilter === 'failed' && t.status !== 'failed') return false;
+                if (typeFilter !== 'all') {
+                  const tt = (t.task_type || t.spec?.task_type || 'immediate').toLowerCase();
+                  if (tt !== typeFilter) return false;
+                }
                 return true;
               })
               .map((task: any) => {
                 const isExpanded = expandedTaskId === task.plan_id;
                 const isRunning = task.status === 'in_progress' || task.status === 'running';
                 const isCompleted = task.status === 'completed';
-                const isPending = task.status === 'pending' || task.status === 'planning' || task.status === 'paused';
+                const isPending = task.status === 'pending' || task.status === 'planning' || task.status === 'paused' || task.status === 'waiting_permission';
+                const isWaitingPermission = task.status === 'waiting_permission';
                 const isFailed = task.status === 'failed';
                 const isCancelled = task.status === 'cancelled';
                 const totalSteps = task.total_steps || task.steps?.length || 1;
@@ -410,6 +454,8 @@ export const AgentTaskManagerTab: React.FC = () => {
                               ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-400'
                               : isCompleted
                               ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
+                              : isWaitingPermission
+                              ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300 animate-pulse'
                               : isPending
                               ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400'
                               : isFailed
@@ -442,6 +488,25 @@ export const AgentTaskManagerTab: React.FC = () => {
                             <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-slate-800/80 text-slate-400 border border-slate-700/60">
                               {task.plan_id}
                             </span>
+                            {/* Type Badge */}
+                            <span
+                              className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                                (task.task_type || task.spec?.task_type) === 'scheduled'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                  : (task.task_type || task.spec?.task_type) === 'continuous'
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : (task.task_type || task.spec?.task_type) === 'conditional'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                  : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              }`}
+                            >
+                              {task.task_type || task.spec?.task_type || 'Type 1: Immediate'}
+                            </span>
+                            {(task.intent_type === 'notify' || task.spec?.intent_type === 'notify') && (
+                              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                                Notify Only
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-slate-400 flex items-center gap-3">
                             <span>
@@ -473,6 +538,8 @@ export const AgentTaskManagerTab: React.FC = () => {
                               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse'
                               : isCompleted
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : isWaitingPermission
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
                               : isPending
                               ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                               : isFailed
@@ -482,8 +549,29 @@ export const AgentTaskManagerTab: React.FC = () => {
                               : 'bg-slate-800 text-slate-400 border border-slate-700'
                           }`}
                         >
-                          {task.status === 'in_progress' ? 'in process' : task.status.replace('_', ' ')}
+                          {isWaitingPermission ? 'Needs Permission' : task.status === 'in_progress' ? 'in process' : task.status.replace('_', ' ')}
                         </span>
+
+                        {isWaitingPermission && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handlePermissionAction(task.plan_id || task.id, 'grant')}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-all cursor-pointer shadow-sm"
+                              title="Allow agent to start this task"
+                            >
+                              Grant
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePermissionAction(task.plan_id || task.id, 'deny')}
+                              className="px-2 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200 text-[11px] font-medium transition-all cursor-pointer"
+                              title="Reject task"
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        )}
 
                         {isRunning && (
                           <button

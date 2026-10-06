@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { ActivitySquare, CheckCircle, AlertTriangle, XCircle, Info } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import type { ActivityEvent } from '../../types';
 
 export const ActivityView: React.FC = () => {
-  const { activities } = useNexus();
+  const { activities } = useSeyalAi();
   const [filterType, setFilterType] = useState<string>('all');
 
   const filtered = activities.filter((act) => {

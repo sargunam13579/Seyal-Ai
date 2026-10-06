@@ -21,7 +21,7 @@ const defaultDataControlSettings: DataControlSettings = {
 export const DataControlsTab: React.FC = () => {
   const [dataControlSettings, setDataControlSettings] = useState<DataControlSettings>(() => {
     try {
-      const saved = localStorage.getItem('nexus_datacontrols_config');
+      const saved = localStorage.getItem('seyal_datacontrols_config');
       return saved ? { ...defaultDataControlSettings, ...JSON.parse(saved) } : defaultDataControlSettings;
     } catch {
       return defaultDataControlSettings;
@@ -35,7 +35,7 @@ export const DataControlsTab: React.FC = () => {
     setDataControlSettings((prev) => {
       const updated = { ...prev, [key]: val };
       try {
-        localStorage.setItem('nexus_datacontrols_config', JSON.stringify(updated));
+        localStorage.setItem('seyal_datacontrols_config', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }
@@ -213,7 +213,7 @@ export const DataControlsTab: React.FC = () => {
                   Anonymous Crash Diagnostics
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Send anonymized application crash stack traces to help improve NEXUS system stability.
+                  Send anonymized application crash stack traces to help improve Seyal AI system stability.
                 </p>
               </div>
               {renderToggle(dataControlSettings.anonymousDiagnostics, (val) =>

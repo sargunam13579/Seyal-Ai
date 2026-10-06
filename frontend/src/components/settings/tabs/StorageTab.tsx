@@ -24,7 +24,7 @@ const defaultStorageSettings: StorageSettings = {
 export const StorageTab: React.FC = () => {
   const [storageSettings, setStorageSettings] = useState<StorageSettings>(() => {
     try {
-      const saved = localStorage.getItem('nexus_storage_config');
+      const saved = localStorage.getItem('seyal_storage_config');
       return saved ? { ...defaultStorageSettings, ...JSON.parse(saved) } : defaultStorageSettings;
     } catch {
       return defaultStorageSettings;
@@ -38,7 +38,7 @@ export const StorageTab: React.FC = () => {
     setStorageSettings((prev) => {
       const updated = { ...prev, [key]: val };
       try {
-        localStorage.setItem('nexus_storage_config', JSON.stringify(updated));
+        localStorage.setItem('seyal_storage_config', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }

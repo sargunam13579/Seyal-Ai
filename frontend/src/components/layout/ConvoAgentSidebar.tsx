@@ -12,7 +12,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import type { ConversationSummary } from '../../types';
@@ -29,9 +29,9 @@ interface ConvoAgentSidebarProps {
   onSelectPrompt?: (promptText: string) => void;
 }
 
-const PINNED_STORAGE_KEY = 'nexus_pinned_agent_task_ids';
-const CONV_CACHE_KEY = 'nexus_agent_conv_cache';
-const RENAME_HISTORY_STORAGE_KEY = 'nexus_agent_rename_history';
+const PINNED_STORAGE_KEY = 'seyal_pinned_agent_task_ids';
+const CONV_CACHE_KEY = 'seyal_agent_conv_cache';
+const RENAME_HISTORY_STORAGE_KEY = 'seyal_agent_rename_history';
 
 const getRenameHistory = (convId: string): string[] => {
   try {
@@ -82,7 +82,7 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     setIsConvoSidebarCollapsed,
     openSettingsTab,
     setUserProfileAvatar,
-  } = useNexus();
+  } = useSeyalAi();
 
   const { signOut, user } = useAuth();
 
@@ -127,7 +127,7 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
   });
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
     try {
-      const stored = localStorage.getItem(PINNED_STORAGE_KEY) || localStorage.getItem('nexus_pinned_conversation_ids');
+      const stored = localStorage.getItem(PINNED_STORAGE_KEY) || localStorage.getItem('seyal_pinned_conversation_ids');
       return stored ? JSON.parse(stored) : [];
     } catch {
       return [];
@@ -630,16 +630,16 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
   };
 
   const [customDisplayName, setCustomDisplayName] = useState<string>(() => {
-    return localStorage.getItem('nexus_user_display_name') || identity?.user_name || (user?.email ? user.email.split('@')[0] : 'User');
+    return localStorage.getItem('seyal_user_display_name') || identity?.user_name || (user?.email ? user.email.split('@')[0] : 'User');
   });
   const [customUsername, setCustomUsername] = useState<string>(() => {
     return (
-      localStorage.getItem('nexus_user_username') ||
+      localStorage.getItem('seyal_user_username') ||
       (user?.email ? user.email.split('@')[0] : 'user')
     );
   });
   const [avatarImage, setAvatarImage] = useState<string | null>(() => {
-    return localStorage.getItem('nexus_user_avatar') || null;
+    return localStorage.getItem('seyal_user_avatar') || null;
   });
 
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
@@ -663,16 +663,16 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
   useEffect(() => {
     const handleAvatarUpdate = () => {
       try {
-        const stored = localStorage.getItem('nexus_user_avatar') || null;
+        const stored = localStorage.getItem('seyal_user_avatar') || null;
         setAvatarImage(stored);
       } catch {
         // ignore
       }
     };
-    window.addEventListener('nexus_avatar_updated', handleAvatarUpdate);
+    window.addEventListener('seyal_avatar_updated', handleAvatarUpdate);
     window.addEventListener('storage', handleAvatarUpdate);
     return () => {
-      window.removeEventListener('nexus_avatar_updated', handleAvatarUpdate);
+      window.removeEventListener('seyal_avatar_updated', handleAvatarUpdate);
       window.removeEventListener('storage', handleAvatarUpdate);
     };
   }, []);
@@ -682,19 +682,19 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     trimmedUser: string,
     newAvatar: string | null
   ) => {
-    localStorage.setItem('nexus_user_display_name', trimmedDisplay);
-    localStorage.setItem('nexus_user_username', trimmedUser);
+    localStorage.setItem('seyal_user_display_name', trimmedDisplay);
+    localStorage.setItem('seyal_user_username', trimmedUser);
     if (newAvatar) {
-      localStorage.setItem('nexus_user_avatar', newAvatar);
+      localStorage.setItem('seyal_user_avatar', newAvatar);
     } else {
-      localStorage.removeItem('nexus_user_avatar');
+      localStorage.removeItem('seyal_user_avatar');
     }
 
     setCustomDisplayName(trimmedDisplay);
     setCustomUsername(trimmedUser);
     setAvatarImage(newAvatar);
     setUserProfileAvatar(newAvatar);
-    window.dispatchEvent(new Event('nexus_avatar_updated'));
+    window.dispatchEvent(new Event('seyal_avatar_updated'));
 
     await api.setupProfile({
       name: trimmedDisplay,

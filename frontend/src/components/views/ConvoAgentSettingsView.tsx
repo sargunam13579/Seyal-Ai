@@ -14,8 +14,9 @@ import {
   Key,
   HardDrive,
   Database,
+  Brain,
 } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import {
   GeneralTab,
   AccountTab,
@@ -24,6 +25,7 @@ import {
   PermissionsTab,
   NotificationsTab,
   PersonalizationTab,
+  UserKnowledgeTab,
   VoiceTab,
   AgentTaskManagerTab,
   SafetyTab,
@@ -40,7 +42,7 @@ interface SidebarItem {
 }
 
 export const ConvoAgentSettingsView: React.FC = () => {
-  const { setActiveView, activeSettingsTab, setActiveSettingsTab } = useNexus();
+  const { setActiveView, activeSettingsTab, setActiveSettingsTab } = useSeyalAi();
 
   // Active tab state — sync with activeSettingsTab from context
   const [activeTab, setActiveTab] = useState<string>(activeSettingsTab || 'general');
@@ -61,6 +63,7 @@ export const ConvoAgentSettingsView: React.FC = () => {
     { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'personalization', label: 'Personalization', icon: Sliders },
+    { id: 'user_knowledge', label: 'User Knowledge & Rules', icon: Brain },
     { id: 'voice', label: 'Voice', isCustomWaveform: true },
     { id: 'agent_task_manager', label: 'Agent Task Manager', icon: ListTodo },
     { id: 'safety', label: 'Safety', icon: Shield },
@@ -153,6 +156,11 @@ export const ConvoAgentSettingsView: React.FC = () => {
           {activeTab === 'permissions' && <PermissionsTab />}
           {activeTab === 'notifications' && <NotificationsTab />}
           {activeTab === 'personalization' && <PersonalizationTab />}
+          {activeTab === 'user_knowledge' && (
+            <div className="flex-1 flex flex-col h-full overflow-y-auto p-6 sm:p-8 custom-scrollbar">
+              <UserKnowledgeTab />
+            </div>
+          )}
           {activeTab === 'voice' && <VoiceTab />}
           {activeTab === 'agent_task_manager' && <AgentTaskManagerTab />}
           {activeTab === 'safety' && <SafetyTab />}
@@ -169,6 +177,7 @@ export const ConvoAgentSettingsView: React.FC = () => {
             'permissions',
             'notifications',
             'personalization',
+            'user_knowledge',
             'voice',
             'agent_task_manager',
             'safety',
@@ -187,7 +196,7 @@ export const ConvoAgentSettingsView: React.FC = () => {
                   <Settings className="w-6 h-6" />
                 </div>
                 <p className="text-xs text-slate-400 max-w-sm">
-                  Standard preferences for this category are managed automatically by the NEXUS OS layer.
+                  Standard preferences for this category are managed automatically by the Seyal AI layer.
                 </p>
               </div>
             </div>

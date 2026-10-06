@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================
-   NEXUS // INTERACTIVE AI OS UI
+   Seyal AI // INTERACTIVE AI OS UI
    CSS ONLY — SAFE REPLACEMENT
    ============================================================ */
 
@@ -609,7 +609,7 @@ aside button:hover {
    ANIMATIONS
    ============================================================ */
 
-@keyframes nexus-fade-up {
+@keyframes seyal-fade-up {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -621,7 +621,7 @@ aside button:hover {
   }
 }
 
-@keyframes nexus-soft-pulse {
+@keyframes seyal-soft-pulse {
 
   0%,
   100% {
@@ -635,7 +635,7 @@ aside button:hover {
   }
 }
 
-@keyframes nexus-glow {
+@keyframes seyal-glow {
 
   0%,
   100% {
@@ -649,7 +649,7 @@ aside button:hover {
   }
 }
 
-@keyframes nexus-shimmer {
+@keyframes seyal-shimmer {
   from {
     background-position: 200% center;
   }
@@ -660,11 +660,11 @@ aside button:hover {
 }
 
 .animate-fadeIn {
-  animation: nexus-fade-up 0.25s ease-out both;
+  animation: seyal-fade-up 0.25s ease-out both;
 }
 
 .animate-pulse-glow {
-  animation: nexus-soft-pulse 2.5s ease-in-out infinite;
+  animation: seyal-soft-pulse 2.5s ease-in-out infinite;
 }
 
 

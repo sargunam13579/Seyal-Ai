@@ -137,7 +137,7 @@ export const RADIAL_SLOTS = [
   { index: 7, label: 'Slot 8: Top', clock: '12:00', angle: 0 },
 ];
 
-const STORAGE_KEY = 'nexus_frequent_task_shortcuts_order';
+const STORAGE_KEY = 'seyal_frequent_task_shortcuts_order';
 
 export function loadSavedRadialOrder(): string[] {
   try {

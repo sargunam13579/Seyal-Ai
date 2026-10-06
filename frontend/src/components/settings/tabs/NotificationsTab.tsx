@@ -49,7 +49,7 @@ const defaultNotifSettings: NotificationSettings = {
 export const NotificationsTab: React.FC = () => {
   const [notifSettings, setNotifSettings] = useState<NotificationSettings>(() => {
     try {
-      const saved = localStorage.getItem('nexus_notification_config');
+      const saved = localStorage.getItem('seyal_notification_config');
       return saved ? { ...defaultNotifSettings, ...JSON.parse(saved) } : defaultNotifSettings;
     } catch {
       return defaultNotifSettings;
@@ -68,7 +68,7 @@ export const NotificationsTab: React.FC = () => {
     setNotifSettings((prev) => {
       const updated = { ...prev, [key]: value };
       try {
-        localStorage.setItem('nexus_notification_config', JSON.stringify(updated));
+        localStorage.setItem('seyal_notification_config', JSON.stringify(updated));
       } catch (e) {
         console.error('Failed to save notification settings', e);
       }

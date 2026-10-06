@@ -15,7 +15,7 @@ import {
   Search,
 } from 'lucide-react';
 import { api } from '../../../services/api';
-import { useNexus } from '../../../context/NexusContext';
+import { useSeyalAi } from '../../../context/SeyalAiContext';
 
 const formatLaptopDateTime = (isoString?: string | null): string => {
   if (!isoString) return '';
@@ -37,7 +37,7 @@ const formatLaptopDateTime = (isoString?: string | null): string => {
 };
 
 export const ComputerAwarenessTab: React.FC = () => {
-  const { addActivity } = useNexus();
+  const { addActivity } = useSeyalAi();
 
   const [awarenessData, setAwarenessData] = useState<any>(null);
   const [isLoadingAwareness, setIsLoadingAwareness] = useState<boolean>(false);

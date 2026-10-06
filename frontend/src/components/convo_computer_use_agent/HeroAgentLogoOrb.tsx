@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useVoice } from '../../context/VoiceContext';
 import { RADIAL_ACTIONS_CATALOG } from '../../config/radialActionsConfig';
 import appLogo from '../../assets/app-logo.png';
@@ -20,7 +20,7 @@ export const HeroAgentLogoOrb: React.FC<HeroAgentLogoOrbProps> = ({ onDismiss, o
     setIsComputerUseActive,
     radialButtonOrder,
     setIsTextInputPopupOpen,
-  } = useNexus();
+  } = useSeyalAi();
   const { voiceState, isListening, startListening, stopListening } = useVoice();
 
   // Drag & dismiss physics state
@@ -411,7 +411,7 @@ export const HeroAgentLogoOrb: React.FC<HeroAgentLogoOrbProps> = ({ onDismiss, o
         setActiveView('assistant');
         setIsTextInputPopupOpen(true);
         setTimeout(() => {
-          const inputEl = document.querySelector('input[data-nexus-input="true"]') as HTMLInputElement | null;
+          const inputEl = document.querySelector('input[data-seyal-input="true"]') as HTMLInputElement | null;
           if (inputEl) inputEl.focus();
         }, 120);
         break;

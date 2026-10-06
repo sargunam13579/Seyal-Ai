@@ -16,7 +16,7 @@ import {
   Mic,
   Sparkles,
 } from 'lucide-react';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useVoice } from '../../context/VoiceContext';
 import { api } from '../../services/api';
 import type { MessageItem } from '../../types';
@@ -72,7 +72,7 @@ export const ConvoComputerUseAgentView: React.FC = () => {
     isTextInputPopupOpen,
     setIsTextInputPopupOpen,
     userProfileAvatar,
-  } = useNexus();
+  } = useSeyalAi();
 
   const {
     isListening,
@@ -196,66 +196,78 @@ export const ConvoComputerUseAgentView: React.FC = () => {
     if (!welcomeSpoken) {
       sessionStorage.setItem('ccua_session_welcome_spoken', 'true');
 
-      const now = new Date();
-      const hour = now.getHours();
-      const timeGreeting =
-        hour >= 5 && hour < 12
-          ? 'Good morning'
-          : hour >= 12 && hour < 17
-          ? 'Good afternoon'
-          : hour >= 17 && hour < 22
-          ? 'Good evening'
-          : 'Hey';
-
-      const welcomeText = `Vanakkam ${userName || 'Friend'}! ${timeGreeting}! Naan ready. Innaiki laptop-la enna task seiyalam, sollunga! 😊✨`;
-      const welcomeMsgId = 'welcome-' + Date.now();
-
-      // 1. Initialize assistant message bubble with empty text so it streams word-by-word in sync
-      setComputerUseMessages((prev) => {
-        if (prev.length === 0) {
-          return [
-            {
-              id: welcomeMsgId,
-              role: 'assistant',
-              content: '',
-              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              model_used: 'gemini-2.5-flash',
-            },
-          ];
+      const triggerGreeting = async () => {
+        let welcomeText = '';
+        try {
+          welcomeText = await api.getWelcomeGreeting(userName || 'Friend');
+        } catch {
+          // fallback
         }
-        return prev;
-      });
+        if (!welcomeText) {
+          const now = new Date();
+          const hour = now.getHours();
+          const timeGreeting =
+            hour >= 5 && hour < 12
+              ? 'Good morning'
+              : hour >= 12 && hour < 17
+              ? 'Good afternoon'
+              : hour >= 17 && hour < 22
+              ? 'Good evening'
+              : 'Hey';
+          welcomeText = `${timeGreeting} ${userName || 'Friend'}! I am ready. What task would you like to run today? 😊✨`;
+        }
 
-      // 2. Speak using the unified assistant voice engine with simultaneous word-by-word streaming!
-      const welcomeTurnId = getNextTurnId();
-      speakAssistantResponse(
-        welcomeText,
-        welcomeTurnId,
-        () => {
-          // On End: Ensure full message is visible and auto-listen starts
-          setComputerUseMessages((prev) => {
-            const next = [...prev];
-            if (next.length > 0 && next[0].id === welcomeMsgId) {
-              next[0] = { ...next[0], content: welcomeText };
-            }
-            return next;
-          });
-          if (isMountedRef.current && autoListen) {
-            triggerVoiceListen();
+        const welcomeMsgId = 'welcome-' + Date.now();
+
+        // 1. Initialize assistant message bubble with empty text so it streams word-by-word in sync
+        setComputerUseMessages((prev) => {
+          if (prev.length === 0) {
+            return [
+              {
+                id: welcomeMsgId,
+                role: 'assistant',
+                content: '',
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                model_used: 'gemini-2.5-flash',
+              },
+            ];
           }
-        },
-        undefined,
-        (revealedText) => {
-          // Word-by-word simultaneous live karaoke sync with audio playback!
-          setComputerUseMessages((prev) => {
-            const next = [...prev];
-            if (next.length > 0 && next[0].id === welcomeMsgId) {
-              next[0] = { ...next[0], content: revealedText };
+          return prev;
+        });
+
+        // 2. Speak using the unified assistant voice engine with simultaneous word-by-word streaming!
+        const welcomeTurnId = getNextTurnId();
+        speakAssistantResponse(
+          welcomeText,
+          welcomeTurnId,
+          () => {
+            // On End: Ensure full message is visible and auto-listen starts
+            setComputerUseMessages((prev) => {
+              const next = [...prev];
+              if (next.length > 0 && next[0].id === welcomeMsgId) {
+                next[0] = { ...next[0], content: welcomeText };
+              }
+              return next;
+            });
+            if (isMountedRef.current && autoListen) {
+              triggerVoiceListen();
             }
-            return next;
-          });
-        }
-      );
+          },
+          undefined,
+          (revealedText) => {
+            // Word-by-word simultaneous live karaoke sync with audio playback!
+            setComputerUseMessages((prev) => {
+              const next = [...prev];
+              if (next.length > 0 && next[0].id === welcomeMsgId) {
+                next[0] = { ...next[0], content: revealedText };
+              }
+              return next;
+            });
+          }
+        );
+      };
+
+      triggerGreeting();
     } else if (autoListen && !isListening && !isSpeaking && !isBusy) {
       // User navigated back from Simple Chat or other tab: Silent standby, do NOT repeat welcome!
       triggerVoiceListen();
@@ -1116,7 +1128,7 @@ export const ConvoComputerUseAgentView: React.FC = () => {
               <div className="flex-1 flex items-center relative">
                 <input
                   ref={textInputRef}
-                  data-nexus-input="true"
+                  data-seyal-input="true"
                   type="text"
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}

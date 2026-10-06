@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useNexus } from '../../../context/NexusContext';
+import { useSeyalAi } from '../../../context/SeyalAiContext';
 
 export const GeneralTab: React.FC = () => {
-  const { identity, requestNameChange } = useNexus();
+  const { identity, requestNameChange } = useSeyalAi();
 
   // Assistant name state
   const [targetName, setTargetName] = useState('');
@@ -59,7 +59,7 @@ export const GeneralTab: React.FC = () => {
                 type="text"
                 value={targetName}
                 onChange={(e) => setTargetName(e.target.value)}
-                placeholder="e.g. Jarvis, Friday, Nova..."
+                placeholder="e.g. Seyal AI"
                 className="flex-1 bg-slate-900/80 border border-slate-700/70 focus:border-cyan-500/60 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/30 font-sans"
               />
               <button

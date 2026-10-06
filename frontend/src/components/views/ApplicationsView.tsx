@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { AppWindow, Play, Search, CheckCircle, Terminal } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
-import { useNexus } from '../../context/NexusContext';
+import { useSeyalAi } from '../../context/SeyalAiContext';
 import { api } from '../../services/api';
 
 interface AppItem {
@@ -13,7 +13,7 @@ interface AppItem {
 }
 
 export const ApplicationsView: React.FC = () => {
-  const { addActivity } = useNexus();
+  const { addActivity } = useSeyalAi();
   const [searchQuery, setSearchQuery] = useState('');
   const [runningApp, setRunningApp] = useState<string | null>(null);
   const [launchFeedback, setLaunchFeedback] = useState<string | null>(null);
