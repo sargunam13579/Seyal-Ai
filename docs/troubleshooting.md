@@ -1,6 +1,6 @@
-# NEXUS Troubleshooting Guide
+# Seyal AI Troubleshooting Guide
 
-Common issues, diagnostic checks, and resolution steps for NEXUS.
+Common issues, diagnostic checks, and resolution steps for Seyal AI.
 
 ---
 
@@ -23,16 +23,16 @@ curl http://localhost:8000/api/health
 ### Problem: Wake word is not triggering or microphone is silent
 - **Cause 1: Missing audio drivers / microphone permission**
   - Verify your microphone is enabled in Windows / OS Settings.
-  - Test audio capture with: `python -m nexus.voice.test_mic`
+  - Test audio capture with: `python -m seyal_ai.voice.test_mic`
 - **Cause 2: Revoked `microphone` scope**
-  - Check permission scopes: `nexus permissions list`
-  - Grant microphone: `nexus permissions grant microphone`
+  - Check permission scopes: `seyal_ai permissions list`
+  - Grant microphone: `seyal_ai permissions grant microphone`
 - **Cause 3: Missing `sounddevice` or PortAudio library**
   - Windows: `pip install sounddevice`
   - Linux: `sudo apt install libportaudio2`
 
 ### Problem: TTS voice is silent or slow
-- **Cause 1**: If using ElevenLabs, check that `NEXUS_ELEVENLABS_API_KEY` is set and has active character quota.
+- **Cause 1**: If using ElevenLabs, check that `SEYAL_AI_ELEVENLABS_API_KEY` is set and has active character quota.
 - **Cause 2**: If offline, ensure `edge-tts` or `pyttsx3` is installed. Fallback to `pyttsx3` if no network is available.
 
 ---
@@ -44,7 +44,7 @@ curl http://localhost:8000/api/health
 - **Fix**:
   1. Add at least one valid key to `.env`:
      ```ini
-     NEXUS_GEMINI_API_KEY=AIzaSy...
+     SEYAL_AI_GEMINI_API_KEY=AIzaSy...
      ```
   2. Or start local Ollama server:
      ```powershell
@@ -67,12 +67,12 @@ curl http://localhost:8000/api/health
 ## 5. Dangerous Command & Permission Errors
 
 ### Problem: `Command blocked: Root or system drive deletion is prohibited`
-- **Cause**: NEXUS detected a blocked catastrophic command pattern (such as `format`, `rmdir /s /q c:\`, or fork bombs).
+- **Cause**: Seyal AI detected a blocked catastrophic command pattern (such as `format`, `rmdir /s /q c:\`, or fork bombs).
 - **Fix**: This is an intentional security safeguard. Adjust the command to target specific safe workspace directories instead of whole drives.
 
 ### Problem: `Tool blocked due to revoked capability scope`
 - **Cause**: The capability scope required by the tool (e.g. `camera`, `file_access`, `device_control`) has been revoked.
 - **Fix**: Grant the scope via CLI or REST API:
   ```powershell
-  nexus permissions grant <scope_name>
+  seyal_ai permissions grant <scope_name>
   ```

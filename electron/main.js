@@ -3,6 +3,20 @@ const path = require('path');
 const { spawn, exec } = require('child_process');
 const http = require('http');
 
+// Pro-Level Single Instance Lock (prevents duplicate windows & port 8000 conflicts)
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('[ELECTRON] Another instance of Seyal AI is already running. Quitting secondary instance.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
 // Direct desktop application launcher for instant reviewer actions
 ipcMain.handle('open-app', async (_event, appName) => {
   try {
@@ -55,11 +69,11 @@ function spawnBackend() {
     if (!isPackaged) {
       // In development, spawn the virtual env python entrypoint
       backendPath = path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe');
-      args = ['-m', 'nexus.main', '--mode', 'api'];
+      args = ['-m', 'seyal_ai.main', '--mode', 'api'];
       cwd = path.join(__dirname, '..');
     } else {
       // In production, run the bundled executable from resources/backend/
-      backendPath = path.join(process.resourcesPath, 'backend', 'nexus_backend.exe');
+      backendPath = path.join(process.resourcesPath, 'backend', 'seyal_ai_backend.exe');
       args = ['--mode', 'api'];
       // Use userData dir as cwd so backend can write db/logs to a writable location
       cwd = app.getPath('userData');
@@ -237,3 +251,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+} // End single instance lock block

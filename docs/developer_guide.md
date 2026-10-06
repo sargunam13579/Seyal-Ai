@@ -1,23 +1,23 @@
-# NEXUS Developer Guide
+# Seyal AI Developer Guide
 
-This guide is intended for engineers contributing to or extending the NEXUS codebase.
+This guide is intended for engineers contributing to or extending the Seyal AI codebase.
 
 ---
 
 ## 1. Project Architecture & Directory Layout
 
 ```
-nexus/
+seyal_ai/
 ├── config/                 # Default YAML settings (default.yaml)
 ├── src/
-│   └── nexus/
+│   └── seyal_ai/
 │       ├── accessibility/  # Earcons, custom macros, screen reader formatters
 │       ├── agents/         # Sub-agents (LaptopAgent, AndroidAgent)
 │       ├── api/            # FastAPI REST & WebSocket routers, middleware
 │       ├── automation/     # Desktop UI automation (pyautogui, accessibility trees)
 │       ├── browser/        # Playwright browser automation
 │       ├── comms/          # Cross-device WebSocket protocol
-│       ├── core/           # NexusBrain, ModelRouter, ToolRegistry, Orchestrator
+│       ├── core/           # SeyalAiBrain, ModelRouter, ToolRegistry, Orchestrator
 │       ├── database/       # SQLite / SQLAlchemy models, engines, migrations
 │       ├── devices/        # Unified Device Manager (laptop, android, remote)
 │       ├── llm/            # Multi-model LLM provider adapters (Gemini, OpenAI, Anthropic, Ollama)
@@ -60,18 +60,18 @@ mypy src
 pytest -v
 
 # Run with test coverage report
-pytest --cov=nexus --cov-report=term-missing
+pytest --cov=seyal_ai --cov-report=term-missing
 ```
 
 ---
 
 ## 3. Creating Custom Tools
 
-To add a new tool to NEXUS, subclass `BaseTool` in `src/nexus/tools/`:
+To add a new tool to Seyal AI, subclass `BaseTool` in `src/seyal_ai/tools/`:
 
 ```python
 from typing import Any
-from nexus.tools.base import BaseTool, RiskLevel, ToolResult
+from seyal_ai.tools.base import BaseTool, RiskLevel, ToolResult
 
 class CustomDataTool(BaseTool):
     name = "custom_data_lookup"
@@ -95,16 +95,16 @@ class CustomDataTool(BaseTool):
             return ToolResult(success=False, error=str(e))
 ```
 
-Register the tool in `src/nexus/core/brain.py` or with `ToolRegistry.register(CustomDataTool())`.
+Register the tool in `src/seyal_ai/core/brain.py` or with `ToolRegistry.register(CustomDataTool())`.
 
 ---
 
 ## 4. Event Bus Architecture
 
-NEXUS uses an asynchronous publish-subscribe `EventBus` (`src/nexus/utils/events.py`) to broadcast state changes across decoupled subsystems without circular dependencies:
+Seyal AI uses an asynchronous publish-subscribe `EventBus` (`src/seyal_ai/utils/events.py`) to broadcast state changes across decoupled subsystems without circular dependencies:
 
 ```python
-from nexus.utils.events import get_event_bus
+from seyal_ai.utils.events import get_event_bus
 
 bus = get_event_bus()
 

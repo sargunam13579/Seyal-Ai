@@ -1,6 +1,6 @@
-# NEXUS Installation Guide
+# Seyal AI Installation Guide
 
-This guide provides comprehensive, step-by-step instructions for installing and setting up the **NEXUS Autonomous AI Agent** on Windows, Linux, and macOS.
+This guide provides comprehensive, step-by-step instructions for installing and setting up the **Seyal AI Autonomous AI Agent** on Windows, Linux, and macOS.
 
 ---
 
@@ -24,8 +24,8 @@ This guide provides comprehensive, step-by-step instructions for installing and 
 
 ### Step 1: Clone the Repository
 ```powershell
-git clone https://github.com/nexus-ai/nexus.git
-cd nexus
+git clone https://github.com/seyal-ai/seyal_ai.git
+cd seyal_ai
 ```
 
 ### Step 2: Create and Activate Virtual Environment
@@ -60,32 +60,32 @@ Open `.env` in your editor and configure your preferred providers:
 
 ```ini
 # --- Assistant Identity ---
-NEXUS_ASSISTANT_NAME=Nexus
-NEXUS_USER_NAME=Shanmuga
+SEYAL_AI_ASSISTANT_NAME=Seyal AI
+SEYAL_AI_USER_NAME=User
 
 # --- LLM Providers (Configure at least one) ---
 # Google Gemini (Recommended primary)
-NEXUS_GEMINI_API_KEY=your_gemini_api_key_here
+SEYAL_AI_GEMINI_API_KEY=your_gemini_api_key_here
 
 # OpenAI (GPT-4o / GPT-4o-mini)
-NEXUS_OPENAI_API_KEY=your_openai_api_key_here
+SEYAL_AI_OPENAI_API_KEY=your_openai_api_key_here
 
 # Anthropic (Claude 3.5 Sonnet)
-NEXUS_ANTHROPIC_API_KEY=your_anthropic_api_key_here
+SEYAL_AI_ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Ollama (Local offline inference)
-NEXUS_OLLAMA_BASE_URL=http://localhost:11434
+SEYAL_AI_OLLAMA_BASE_URL=http://localhost:11434
 
 # --- Voice & Speech Providers ---
 # Deepgram STT (Ultra-fast real-time speech-to-text)
-NEXUS_DEEPGRAM_API_KEY=your_deepgram_api_key_here
+SEYAL_AI_DEEPGRAM_API_KEY=your_deepgram_api_key_here
 
 # ElevenLabs TTS (Ultra-realistic natural voices)
-NEXUS_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+SEYAL_AI_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
 
 # Local TTS Engine (edge-tts / pyttsx3)
-NEXUS_VOICE_TTS_ENGINE=edge-tts
-NEXUS_VOICE_STT_ENGINE=vosk
+SEYAL_AI_VOICE_TTS_ENGINE=edge-tts
+SEYAL_AI_VOICE_STT_ENGINE=vosk
 ```
 
 ---
@@ -98,36 +98,36 @@ NEXUS_VOICE_STT_ENGINE=vosk
 ```powershell
 adb devices
 ```
-3. NEXUS will automatically discover and pair with connected devices.
+3. Seyal AI will automatically discover and pair with connected devices.
 
 ### B. Offline Speech Models (Vosk / Whisper)
 For 100% offline speech recognition:
 1. Download a lightweight Vosk model:
 ```powershell
 # Small English model (~40MB)
-python -m nexus.voice.download_models --model small-en
+python -m seyal_ai.voice.download_models --model small-en
 ```
 
 ---
 
-## 5. Starting NEXUS
+## 5. Starting Seyal AI
 
 ### Interactive CLI Mode
 ```powershell
-nexus cli
+seyal_ai cli
 # or via python module
-python -m nexus.cli
+python -m seyal_ai.cli
 ```
 
 ### Background REST & WebSocket Server
 ```powershell
-nexus serve --port 8000
+seyal_ai serve --port 8000
 ```
 Interactive API documentation will be available at: [http://localhost:8000/docs](http://localhost:8000/docs).
 
 ### Voice-First Mode
 ```powershell
-nexus voice
+seyal_ai voice
 ```
 
 ---

@@ -1,4 +1,4 @@
-# NEXUS — Voice-First, Cross-Device Autonomous Personal AI Agent
+# Seyal AI — Voice-First, Cross-Device Autonomous Personal AI Agent
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Tests Passing](https://img.shields.io/badge/tests-276%20passed-brightgreen.svg)]()
@@ -6,21 +6,21 @@
 [![Type Checking](https://img.shields.io/badge/type%20checker-pyright%20%7C%20mypy-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> **NEXUS** is an autonomous, hands-free personal AI agent engineered to understand complex user goals, plan multi-step workflows, control desktop applications and Android mobile devices, and operate seamlessly across your personal ecosystem with military-grade safety guards.
+> **Seyal AI** is an autonomous, hands-free personal AI agent engineered to understand complex user goals, plan multi-step workflows, control desktop applications and Android mobile devices, and operate seamlessly across your personal ecosystem with military-grade safety guards.
 
 ---
 
 ## 🌟 Key Capabilities
 
 - 🤖 **Autonomous Multi-Step Planning**: Understands high-level compound goals, decomposes them into dependency-ordered graphs, handles retries, variable passing (`{{step_1.output}}`), and automated result verification.
-- 🎙️ **Voice-First & Hands-Free**: Low-latency voice loop with wake word detection (*"Nexus"*), dynamic renaming (*"Call yourself Jarvis"*), and non-visual audio feedback (earcons).
+- 🎙️ **Voice-First & Hands-Free**: Low-latency voice loop with wake word detection (*"Seyal AI"*), dynamic renaming (*"Call yourself Aria"*), and non-visual audio feedback (earcons).
 - 💻 **Complete Laptop Control**: 64 OS automation tools for window management, document conversion, audio control, application launching, and screen understanding.
-- 📱 **Android Mobile Control**: Remote control via ADB, touch gestures, screen taps, app management, and bi-directional cross-device file transfer.
+- 🖥️ **Conversational Computer-Use**: Autonomous visual agent utilizing Set-of-Marks grounding and real-time screen awareness for Windows apps.
 - 🌐 **Browser Automation**: Full Playwright automation for navigating web pages, filling forms, and extracting live web content.
 - 🧠 **Unified 6-Tier Memory**: Working, Short-Term, Long-Term, Episodic, Semantic (ChromaDB vector store), and Procedural memory with automated preference learning.
 - 🔒 **Defense-in-Depth Security**: Granular permission scopes (view/revoke), AES-GCM encrypted secret vault, PIN-based device pairing, and dangerous command blockers.
 - ⚡ **Offline Mode Fallback**: Deterministic local command execution (app launching, volume control, status queries, emergency stop) when internet or cloud LLMs are unavailable.
-- 🚨 **Universal Kill Switch**: Emergency stop command (*"NEXUS STOP"*) instantly halts all background tasks, sub-agents, and hardware actions.
+- 🚨 **Universal Kill Switch**: Emergency stop command (*"Seyal AI STOP"*) instantly halts all background tasks, sub-agents, and hardware actions.
 
 ---
 
@@ -29,8 +29,8 @@
 ### 1. Installation
 ```powershell
 # Clone the repository
-git clone https://github.com/nexus-ai/nexus.git
-cd nexus
+git clone https://github.com/seyal-ai/seyal_ai.git
+cd seyal_ai
 
 # Create virtual environment
 python -m venv .venv
@@ -46,16 +46,16 @@ cp .env.example .env
 # Configure your preferred LLM and Speech API keys in .env
 ```
 
-### 3. Launching NEXUS
+### 3. Launching Seyal AI
 ```powershell
 # Interactive CLI mode
-nexus cli
+seyal_ai cli
 
 # Voice-first hands-free mode
-nexus voice
+seyal_ai voice
 
 # Background REST & WebSocket Server (Swagger at http://localhost:8000/docs)
-nexus serve --port 8000
+seyal_ai serve --port 8000
 ```
 
 ---
@@ -79,7 +79,7 @@ User Voice / Text / API
          │
          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       NexusBrain                            │
+│                       SeyalAiBrain                            │
 │  ┌─────────────────┐ ┌──────────────────┐ ┌───────────────┐ │
 │  │ Identity / Wake │ │ Permissions Guard│ │ Offline Engine│ │
 │  └─────────────────┘ └──────────────────┘ └───────────────┘ │
@@ -109,7 +109,7 @@ User Voice / Text / API
 
 ## 🧪 Testing & Verification
 
-NEXUS includes 12 comprehensive test suites covering all 17 feature areas:
+Seyal AI includes 12 comprehensive test suites covering all 17 feature areas:
 
 ```powershell
 # Run the entire test suite (276+ tests)

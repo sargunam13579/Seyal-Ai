@@ -1,6 +1,6 @@
-# NEXUS System Architecture
+# Seyal AI System Architecture
 
-This document details the modular subsystem architecture of **NEXUS**, explaining data flows, component relationships, and concurrency models.
+This document details the modular subsystem architecture of **Seyal AI**, explaining data flows, component relationships, and concurrency models.
 
 ---
 
@@ -11,7 +11,7 @@ graph TD
     User([User Voice / Text / API]) --> Gateway[API Gateway / CLI / Voice Loop]
     
     subgraph "Core Orchestration Layer"
-        Gateway --> Brain[NexusBrain]
+        Gateway --> Brain[SeyalAiBrain]
         Brain --> Identity[Identity & Wake Word Manager]
         Brain --> SecurityGuard[Security & Permission Guard]
         Brain --> ModelRouter[ModelRouter]
@@ -51,8 +51,8 @@ graph TD
 
 ## 2. Subsystem Breakdown
 
-### 1. Core Brain & Orchestration (`nexus.core`)
-- **`NexusBrain`**: Central lifecycle coordinator. Routes input through emergency checks, custom macros, offline fallback, confirmations, and multi-step plans.
+### 1. Core Brain & Orchestration (`seyal_ai.core`)
+- **`SeyalAiBrain`**: Central lifecycle coordinator. Routes input through emergency checks, custom macros, offline fallback, confirmations, and multi-step plans.
 - **`ModelRouter`**: Dynamically dispatches prompts to optimal models across 4 tiers:
   - `FAST`: Gemini 2.0 Flash / GPT-4o-mini
   - `SMART`: Claude 3.5 Sonnet / GPT-4o
@@ -60,13 +60,13 @@ graph TD
   - `LOCAL`: Ollama (Llama 3 / Mistral)
 - **`ContextManager`**: Maintains multi-turn conversation memory and sliding working window.
 
-### 2. Autonomous Planning Engine (`nexus.planning`)
+### 2. Autonomous Planning Engine (`seyal_ai.planning`)
 - **`TaskPlanner`**: Breaks compound goals into dependency-ordered `PlanStep` graphs.
 - **`ToolSelector`**: Matches step descriptions to 60+ system tools and performs runtime parameter interpolation (`{{step_1.output}}`).
 - **`PlanExecutionEngine`**: Sequentially executes steps, validates intermediate results, triggers confirmations for risky actions, and performs verification checks.
 - **`CancellationManager`**: Manages cooperative `CancellationToken` signals and immediate hard process kills (`EMERGENCY STOP`).
 
-### 3. Unified 6-Category Memory System (`nexus.memory`)
+### 3. Unified 6-Category Memory System (`seyal_ai.memory`)
 1. **Working Memory**: Current conversation turn context.
 2. **Short-Term Memory**: Session history and ephemeral task scratchpad.
 3. **Long-Term Memory**: Persistent facts, profile attributes, and learned habits.
@@ -74,7 +74,7 @@ graph TD
 5. **Semantic Memory**: Domain knowledge vector index with ChromaDB embedding retrieval.
 6. **Procedural Memory**: Custom macros, multi-step workflows, and execution templates.
 
-### 4. Device & Agent Execution Layer (`nexus.agents`, `nexus.devices`)
+### 4. Device & Agent Execution Layer (`seyal_ai.agents`, `seyal_ai.devices`)
 - **`LaptopAgent`**: 64 system automation tools (file search, conversion, window management, audio control).
 - **`AndroidAgent`**: ADB automation (touch gestures, app launches, notifications, file sync).
 - **`BrowserAgent`**: Headless/headful Playwright web automation.

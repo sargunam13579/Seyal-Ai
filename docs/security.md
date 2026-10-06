@@ -1,12 +1,12 @@
-# NEXUS Security & Privacy Architecture
+# Seyal AI Security & Privacy Architecture
 
-Security, user agency, privacy, and system safety are foundational principles of the **NEXUS** agent architecture.
+Security, user agency, privacy, and system safety are foundational principles of the **Seyal AI** agent architecture.
 
 ---
 
 ## 1. Threat Model & Defense-in-Depth
 
-NEXUS operates as an autonomous agent with local system access, device control, and network connectivity. To prevent misuse, unauthorized data extraction, and catastrophic system damage, NEXUS enforces multiple security layers:
+Seyal AI operates as an autonomous agent with local system access, device control, and network connectivity. To prevent misuse, unauthorized data extraction, and catastrophic system damage, Seyal AI enforces multiple security layers:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -28,7 +28,7 @@ NEXUS operates as an autonomous agent with local system access, device control, 
 
 ## 2. Granular Permission Scopes
 
-NEXUS isolates hardware and sensitive system capabilities into distinct permission scopes:
+Seyal AI isolates hardware and sensitive system capabilities into distinct permission scopes:
 
 | Scope | Description | Associated Tools | Default |
 |---|---|---|---|
@@ -47,7 +47,7 @@ When a scope is revoked, the tool executor instantly rejects any tool invocation
 
 ## 3. Dangerous Terminal Command Protection
 
-All shell and PowerShell commands pass through the `TerminalSecurityClassifier` (`src/nexus/security/terminal_security.py`) prior to execution:
+All shell and PowerShell commands pass through the `TerminalSecurityClassifier` (`src/seyal_ai/security/terminal_security.py`) prior to execution:
 
 ### Strictly Blocked Commands (`BLOCKED`)
 - Disk formatting (`format c:`, `diskpart`, `bcdedit`)
@@ -64,16 +64,16 @@ All shell and PowerShell commands pass through the `TerminalSecurityClassifier` 
 
 ## 4. Cryptographic Secret Vault
 
-Sensitive credentials (Gemini, OpenAI, Anthropic, Deepgram, and ElevenLabs API keys) are stored in an encrypted vault (`~/.nexus/vault.enc`):
+Sensitive credentials (Gemini, OpenAI, Anthropic, Deepgram, and ElevenLabs API keys) are stored in an encrypted vault (`~/.seyal_ai/vault.enc`):
 - **Cipher**: AES-256-GCM authenticated encryption.
 - **Key Derivation**: PBKDF2-HMAC-SHA256 with 100,000 iterations and per-vault salt.
-- **Key Storage**: Master key stored in restricted permissions file `~/.nexus/keys/master.key` (POSIX `0600`).
+- **Key Storage**: Master key stored in restricted permissions file `~/.seyal_ai/keys/master.key` (POSIX `0600`).
 
 ---
 
 ## 5. Device Pairing & Handshake
 
-To prevent unauthorized devices on the local network from sending commands to NEXUS:
+To prevent unauthorized devices on the local network from sending commands to Seyal AI:
 1. Devices must initiate a pairing handshake.
 2. A random, time-limited 6-digit numeric PIN is generated and displayed on the host.
 3. The connecting device must present the PIN within 300 seconds.
@@ -84,4 +84,4 @@ To prevent unauthorized devices on the local network from sending commands to NE
 
 ## 6. Audit Logging
 
-Every tool execution, permission check, security block, authentication event, and device pairing is recorded in the append-only audit trail (`src/nexus/security/audit.py` and SQLite `audit_log` table) for forensic review and full transparency.
+Every tool execution, permission check, security block, authentication event, and device pairing is recorded in the append-only audit trail (`src/seyal_ai/security/audit.py` and SQLite `audit_log` table) for forensic review and full transparency.

@@ -1,6 +1,6 @@
-# NEXUS REST & WebSocket API Reference
+# Seyal AI REST & WebSocket API Reference
 
-The NEXUS backend provides a comprehensive REST and WebSocket API for client applications, browser extensions, mobile companions, and voice peripherals.
+The Seyal AI backend provides a comprehensive REST and WebSocket API for client applications, browser extensions, mobile companions, and voice peripherals.
 
 Base URL: `http://localhost:8000/api`
 Interactive Swagger UI: `http://localhost:8000/docs`

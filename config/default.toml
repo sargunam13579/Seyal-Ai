@@ -1,13 +1,13 @@
 # ==============================================================================
-# NEXUS — Default Configuration
+# Seyal AI — Default Configuration
 # ==============================================================================
 
 [general]
 app_name = "Seyal AI"
 version = "0.1.0"
-data_dir = "~/.nexus"
+data_dir = "~/.seyal_ai"
 log_level = "INFO"
-log_file = "nexus.log"
+log_file = "seyal_ai.log"
 
 [llm]
 # Default model tier for different task types
@@ -28,7 +28,7 @@ base_url = "http://localhost:11434"
 
 [voice]
 enabled = false                    # Set to true to enable voice
-wake_word = "hey nexus"
+wake_word = "hey seyal"
 stt_provider = "multilingual_gemini" # multilingual_gemini | google_web | vosk
 tts_provider = "edge"              # edge | pyttsx3
 interaction_mode = "voice_and_text" # voice_and_text | voice_only | text_only
@@ -63,13 +63,13 @@ embedding_model = "all-MiniLM-L6-v2"
 max_retrieval_results = 10
 
 [database]
-url = "sqlite+aiosqlite:///~/.nexus/nexus.db"
+url = "sqlite+aiosqlite:///~/.seyal_ai/seyal_ai.db"
 echo = false
 
 [vector_store]
 provider = "chromadb"
-persist_directory = "~/.nexus/chromadb"
-collection_name = "nexus_memory"
+persist_directory = "~/.seyal_ai/chromadb"
+collection_name = "seyal_memory"
 
 [security]
 require_auth = true               # Enable when auth is implemented
