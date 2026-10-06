@@ -3,14 +3,14 @@ import urllib.request
 
 
 def run_integration_check():
-    print("=== NEXUS AI ASSISTANT FULL INTEGRATION VERIFICATION ===")
+    print("=== Seyal AI AI ASSISTANT FULL INTEGRATION VERIFICATION ===")
 
     # 1. Frontend Vite Server Check
     try:
         with urllib.request.urlopen('http://127.0.0.1:5173/') as response:
             html = response.read().decode('utf-8')
             print(f"[OK] Frontend UI Server: HTTP {response.status} (Serving {len(html)} bytes)")
-            assert "NEXUS" in html
+            assert "Seyal AI" in html
     except Exception as e:
         print(f"[FAIL] Frontend UI Server: {e}")
 

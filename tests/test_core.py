@@ -1,9 +1,9 @@
-"""Tests for the NEXUS context manager and core utilities."""
+"""Tests for the Seyal AI context manager and core utilities."""
 
 from __future__ import annotations
 
-from nexus.core.context import ContextManager
-from nexus.utils.text import format_file_size, normalize_text, sanitize_filename, truncate
+from seyal_ai.core.context import ContextManager
+from seyal_ai.utils.text import format_file_size, normalize_text, sanitize_filename, truncate
 
 # ---------------------------------------------------------------------------
 # Context Manager Tests
@@ -27,13 +27,13 @@ class TestContextManager:
 
     def test_system_prompt(self):
         ctx = ContextManager(max_turns=10)
-        ctx.set_system_prompt("You are NEXUS")
+        ctx.set_system_prompt("You are Seyal AI")
         ctx.add_user_message("Hello")
 
         messages = ctx.get_messages()
         assert len(messages) == 2
         assert messages[0].role == "system"
-        assert messages[0].content == "You are NEXUS"
+        assert messages[0].content == "You are Seyal AI"
         assert messages[1].role == "user"
 
     def test_trim_old_messages(self):

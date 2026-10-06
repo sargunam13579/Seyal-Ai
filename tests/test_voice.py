@@ -1,5 +1,5 @@
 """
-Tests for the NEXUS Voice System (Phase 2).
+Tests for the Seyal AI Voice System (Phase 2).
 
 Tests cover:
   - STT engine initialization and provider routing
@@ -45,7 +45,7 @@ class TestAudioIO:
     """Tests for audio_io module utility functions."""
 
     def test_audio_to_wav_bytes(self):
-        from nexus.voice.audio_io import audio_to_wav_bytes
+        from seyal_ai.voice.audio_io import audio_to_wav_bytes
 
         audio = _make_audio(0.5)
         wav_bytes = audio_to_wav_bytes(audio, sample_rate=16000)
@@ -56,7 +56,7 @@ class TestAudioIO:
         assert wav_bytes[:4] == b"RIFF"
 
     def test_wav_roundtrip(self):
-        from nexus.voice.audio_io import audio_to_wav_bytes, wav_bytes_to_audio
+        from seyal_ai.voice.audio_io import audio_to_wav_bytes, wav_bytes_to_audio
 
         original = _make_audio(0.5)
         wav_bytes = audio_to_wav_bytes(original, sample_rate=16000)
@@ -67,20 +67,20 @@ class TestAudioIO:
         np.testing.assert_array_equal(recovered, original)
 
     def test_audio_recorder_init(self):
-        from nexus.voice.audio_io import AudioRecorder
+        from seyal_ai.voice.audio_io import AudioRecorder
 
         rec = AudioRecorder(sample_rate=16000, chunk_duration_ms=30)
         assert rec.sample_rate == 16000
         assert rec.is_recording is False
 
     def test_audio_player_init(self):
-        from nexus.voice.audio_io import AudioPlayer
+        from seyal_ai.voice.audio_io import AudioPlayer
 
         player = AudioPlayer(sample_rate=16000)
         assert player.is_playing is False
 
     def test_audio_player_stop_when_not_playing(self):
-        from nexus.voice.audio_io import AudioPlayer
+        from seyal_ai.voice.audio_io import AudioPlayer
 
         player = AudioPlayer()
         # Should not raise
@@ -88,7 +88,7 @@ class TestAudioIO:
         assert player.is_playing is False
 
     def test_audio_recorder_callbacks(self):
-        from nexus.voice.audio_io import AudioRecorder
+        from seyal_ai.voice.audio_io import AudioRecorder
 
         rec = AudioRecorder()
         cb = MagicMock()
@@ -99,7 +99,7 @@ class TestAudioIO:
         assert cb not in rec._callbacks
 
     def test_audio_recorder_remove_nonexistent_callback(self):
-        from nexus.voice.audio_io import AudioRecorder
+        from seyal_ai.voice.audio_io import AudioRecorder
 
         rec = AudioRecorder()
         cb = MagicMock()
@@ -117,8 +117,8 @@ class TestVAD:
 
     def test_vad_init(self):
         """VAD initializes with correct defaults."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VADState, VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VADState, VoiceActivityDetector
 
             vad = VoiceActivityDetector(
                 sample_rate=16000,
@@ -130,8 +130,8 @@ class TestVAD:
 
     def test_vad_energy_computation(self):
         """Energy computation returns reasonable values."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VoiceActivityDetector
 
             vad = VoiceActivityDetector()
 
@@ -145,8 +145,8 @@ class TestVAD:
 
     def test_vad_silence_stays_idle(self):
         """Silence chunks keep VAD in IDLE state."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VADState, VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VADState, VoiceActivityDetector
 
             vad = VoiceActivityDetector(energy_threshold=300)
 
@@ -156,8 +156,8 @@ class TestVAD:
 
     def test_vad_reset(self):
         """Reset clears all VAD state."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VADState, VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VADState, VoiceActivityDetector
 
             vad = VoiceActivityDetector()
             vad._state = VADState.SPEECH
@@ -169,16 +169,16 @@ class TestVAD:
 
     def test_vad_get_speech_segment_empty(self):
         """get_speech_segment returns None when no speech accumulated."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VoiceActivityDetector
 
             vad = VoiceActivityDetector()
             assert vad.get_speech_segment() is None
 
     def test_vad_get_speech_segment_with_data(self):
         """get_speech_segment concatenates accumulated chunks."""
-        with patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"):
-            from nexus.voice.vad import VoiceActivityDetector
+        with patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"):
+            from seyal_ai.voice.vad import VoiceActivityDetector
 
             vad = VoiceActivityDetector()
 
@@ -203,7 +203,7 @@ class TestSTTEngine:
 
     def test_stt_engine_init_google_web(self):
         """STT engine initializes with google_web provider."""
-        from nexus.voice.stt import STTEngine
+        from seyal_ai.voice.stt import STTEngine
 
         stt = STTEngine(provider_name="google_web", language="en-US")
         assert "Google Web Speech" in stt.provider_name
@@ -211,21 +211,21 @@ class TestSTTEngine:
 
     def test_stt_engine_init_vosk(self):
         """STT engine initializes with vosk provider."""
-        from nexus.voice.stt import STTEngine
+        from seyal_ai.voice.stt import STTEngine
 
         stt = STTEngine(provider_name="vosk", language="en-US")
         assert stt.provider_name == "Vosk (Offline)"
 
     def test_stt_engine_fallback_unknown(self):
         """Unknown provider falls back to google_web."""
-        from nexus.voice.stt import STTEngine
+        from seyal_ai.voice.stt import STTEngine
 
         stt = STTEngine(provider_name="unknown_provider")
         assert "Google Web Speech" in stt.provider_name
 
     def test_stt_language_setter(self):
         """Language can be changed after init."""
-        from nexus.voice.stt import STTEngine
+        from seyal_ai.voice.stt import STTEngine
 
         stt = STTEngine(language="en-US")
         stt.language = "ta-IN"
@@ -234,7 +234,7 @@ class TestSTTEngine:
     @pytest.mark.asyncio
     async def test_stt_no_provider_raises(self):
         """Transcription raises when no provider is set."""
-        from nexus.voice.stt import STTEngine, STTError
+        from seyal_ai.voice.stt import STTEngine, STTError
 
         stt = STTEngine()
         stt._init_provider = lambda: None
@@ -246,7 +246,7 @@ class TestSTTEngine:
     @pytest.mark.asyncio
     async def test_google_web_stt_availability(self):
         """Google Web STT reports availability based on import."""
-        from nexus.voice.stt import GoogleWebSTTProvider
+        from seyal_ai.voice.stt import GoogleWebSTTProvider
 
         provider = GoogleWebSTTProvider()
         # This depends on whether speech_recognition is installed
@@ -256,7 +256,7 @@ class TestSTTEngine:
     @pytest.mark.asyncio
     async def test_stt_engine_check_availability(self):
         """STT engine check_availability delegates to provider."""
-        from nexus.voice.stt import STTEngine
+        from seyal_ai.voice.stt import STTEngine
 
         stt = STTEngine()
         available = await stt.check_availability()
@@ -273,7 +273,7 @@ class TestTTSEngine:
 
     def test_tts_engine_init_edge(self):
         """TTS engine initializes with edge provider."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine(provider_name="edge", voice="en-US-JennyNeural")
         assert tts.provider_name == "Edge TTS"
@@ -282,21 +282,21 @@ class TestTTSEngine:
 
     def test_tts_engine_init_pyttsx3(self):
         """TTS engine initializes with pyttsx3 provider."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine(provider_name="pyttsx3")
         assert tts.provider_name == "pyttsx3 (Offline)"
 
     def test_tts_engine_fallback_unknown(self):
         """Unknown provider falls back to edge."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine(provider_name="unknown")
         assert tts.provider_name == "Edge TTS"
 
     def test_tts_voice_setter(self):
         """TTS voice can be changed."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine()
         tts.voice = "en-US-GuyNeural"
@@ -304,7 +304,7 @@ class TestTTSEngine:
 
     def test_tts_speed_setter(self):
         """TTS speed is clamped to valid range."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine()
         tts.speed = 2.0
@@ -316,7 +316,7 @@ class TestTTSEngine:
 
     def test_tts_stop_request(self):
         """TTS stop request sets the flag."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine()
         assert not tts._stop_requested
@@ -327,7 +327,7 @@ class TestTTSEngine:
 
     def test_tts_is_speaking(self):
         """is_speaking reflects current state."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine()
         assert tts.is_speaking is False
@@ -335,7 +335,7 @@ class TestTTSEngine:
     @pytest.mark.asyncio
     async def test_tts_check_availability(self):
         """TTS availability check works."""
-        from nexus.voice.tts import TTSEngine
+        from seyal_ai.voice.tts import TTSEngine
 
         tts = TTSEngine(provider_name="edge")
         available = await tts.check_availability()
@@ -346,7 +346,7 @@ class TestSentenceSplitting:
     """Tests for sentence splitting used in interruptible TTS."""
 
     def test_split_simple(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         result = _split_sentences("Hello world. How are you?")
         assert len(result) == 2
@@ -354,26 +354,26 @@ class TestSentenceSplitting:
         assert result[1] == "How are you?"
 
     def test_split_exclamation(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         # "Wow!" is < 10 chars so gets merged with next sentence
         result = _split_sentences("Wow! That's amazing. Really!")
         assert len(result) == 2
 
     def test_split_empty(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         result = _split_sentences("")
         assert result == []
 
     def test_split_single_sentence(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         result = _split_sentences("Just one sentence")
         assert result == ["Just one sentence"]
 
     def test_split_merges_short_fragments(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         # "Oh." is < 10 chars and should be merged
         result = _split_sentences("Hello world. Oh. That's interesting.")
@@ -381,7 +381,7 @@ class TestSentenceSplitting:
         assert any("Oh." in s for s in result)
 
     def test_split_preserves_punctuation(self):
-        from nexus.voice.tts import _split_sentences
+        from seyal_ai.voice.tts import _split_sentences
 
         result = _split_sentences("First sentence. Second sentence!")
         assert result[0].endswith(".")
@@ -398,7 +398,7 @@ class TestPipelineState:
 
     def test_pipeline_states_exist(self):
         """All pipeline states are defined."""
-        from nexus.voice.pipeline import PipelineState
+        from seyal_ai.voice.pipeline import PipelineState
 
         assert PipelineState.STOPPED.value == "stopped"
         assert PipelineState.IDLE.value == "idle"
@@ -409,7 +409,7 @@ class TestPipelineState:
 
     def test_interaction_modes(self):
         """All interaction modes are defined."""
-        from nexus.voice.pipeline import InteractionMode
+        from seyal_ai.voice.pipeline import InteractionMode
 
         assert InteractionMode.VOICE_AND_TEXT.value == "voice_and_text"
         assert InteractionMode.VOICE_ONLY.value == "voice_only"
@@ -417,7 +417,7 @@ class TestPipelineState:
 
     def test_input_modes(self):
         """All input modes are defined."""
-        from nexus.voice.pipeline import InputMode
+        from seyal_ai.voice.pipeline import InputMode
 
         assert InputMode.VOICE.value == "voice"
         assert InputMode.TEXT.value == "text"
@@ -427,9 +427,9 @@ class TestVoicePipeline:
     """Tests for the VoicePipeline orchestrator."""
 
     def _make_mock_brain(self):
-        """Create a mock NexusBrain."""
+        """Create a mock SeyalAiBrain."""
         brain = MagicMock()
-        brain.process = AsyncMock(return_value="I'm NEXUS, your AI assistant.")
+        brain.process = AsyncMock(return_value="I'm Seyal AI, your AI assistant.")
         brain._settings = MagicMock()
         brain._settings.voice.sample_rate = 16000
         brain._settings.voice.stt_provider = "google_web"
@@ -453,13 +453,13 @@ class TestVoicePipeline:
 
         # Patch the component imports inside the pipeline __init__
         with (
-            patch("nexus.voice.audio_io.AudioRecorder"),
-            patch("nexus.voice.audio_io.AudioPlayer"),
-            patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"),
-            patch("nexus.voice.stt.STTEngine._init_provider"),
-            patch("nexus.voice.tts.TTSEngine._init_providers"),
+            patch("seyal_ai.voice.audio_io.AudioRecorder"),
+            patch("seyal_ai.voice.audio_io.AudioPlayer"),
+            patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"),
+            patch("seyal_ai.voice.stt.STTEngine._init_provider"),
+            patch("seyal_ai.voice.tts.TTSEngine._init_providers"),
         ):
-            from nexus.voice.pipeline import VoicePipeline
+            from seyal_ai.voice.pipeline import VoicePipeline
 
             pipeline = VoicePipeline(brain=brain, **kwargs)
 
@@ -480,7 +480,7 @@ class TestVoicePipeline:
 
     def test_pipeline_init(self):
         """Pipeline initializes all components."""
-        from nexus.voice.pipeline import PipelineState
+        from seyal_ai.voice.pipeline import PipelineState
 
         pipeline = self._make_pipeline()
 
@@ -489,7 +489,7 @@ class TestVoicePipeline:
 
     def test_pipeline_interaction_mode(self):
         """Interaction mode can be changed."""
-        from nexus.voice.pipeline import InteractionMode
+        from seyal_ai.voice.pipeline import InteractionMode
 
         pipeline = self._make_pipeline()
 
@@ -522,7 +522,7 @@ class TestVoicePipeline:
 
     def test_pipeline_state_callbacks(self):
         """State change callbacks are invoked."""
-        from nexus.voice.pipeline import PipelineState
+        from seyal_ai.voice.pipeline import PipelineState
 
         pipeline = self._make_pipeline()
 
@@ -538,7 +538,7 @@ class TestVoicePipeline:
     @pytest.mark.asyncio
     async def test_pipeline_text_only_no_start(self):
         """Pipeline does not start in text_only mode."""
-        from nexus.voice.pipeline import PipelineState
+        from seyal_ai.voice.pipeline import PipelineState
 
         pipeline = self._make_pipeline(interaction_mode="text_only")
 
@@ -552,9 +552,9 @@ class TestVoicePipeline:
         brain = self._make_mock_brain()
         pipeline = self._make_pipeline(brain=brain)
 
-        response = await pipeline.process_text_input("Hello NEXUS")
-        assert response == "I'm NEXUS, your AI assistant."
-        brain.process.assert_called_once_with("Hello NEXUS")
+        response = await pipeline.process_text_input("Hello Seyal AI")
+        assert response == "I'm Seyal AI, your AI assistant."
+        brain.process.assert_called_once_with("Hello Seyal AI")
 
     @pytest.mark.asyncio
     async def test_pipeline_stop_when_not_running(self):
@@ -575,7 +575,7 @@ class TestVoiceConfig:
     """Tests for voice configuration models."""
 
     def test_voice_settings_defaults(self):
-        from nexus.core.config import VoiceSettings
+        from seyal_ai.core.config import VoiceSettings
 
         vs = VoiceSettings()
         assert vs.enabled is False
@@ -587,14 +587,14 @@ class TestVoiceConfig:
         assert vs.sample_rate == 16000
 
     def test_voice_tts_settings_defaults(self):
-        from nexus.core.config import VoiceTTSSettings
+        from seyal_ai.core.config import VoiceTTSSettings
 
         tts = VoiceTTSSettings()
         assert tts.voice in ("auto", "en-US-JennyNeural", "en-US-AvaMultilingualNeural")
         assert tts.speed == 1.0
 
     def test_voice_vad_settings_defaults(self):
-        from nexus.core.config import VoiceVADSettings
+        from seyal_ai.core.config import VoiceVADSettings
 
         vad = VoiceVADSettings()
         assert vad.threshold == 0.5
@@ -602,7 +602,7 @@ class TestVoiceConfig:
         assert vad.energy_threshold == 300
 
     def test_voice_stt_settings_defaults(self):
-        from nexus.core.config import VoiceSTTSettings
+        from seyal_ai.core.config import VoiceSTTSettings
 
         stt = VoiceSTTSettings()
         assert stt.language in ("auto", "en-US")
@@ -618,13 +618,13 @@ class TestVoiceErrorHandling:
     """Tests for error handling in the voice system."""
 
     def test_stt_error(self):
-        from nexus.voice.stt import STTError
+        from seyal_ai.voice.stt import STTError
 
         err = STTError("test error")
         assert str(err) == "test error"
 
     def test_tts_error(self):
-        from nexus.voice.tts import TTSError
+        from seyal_ai.voice.tts import TTSError
 
         err = TTSError("test error")
         assert str(err) == "test error"
@@ -632,7 +632,7 @@ class TestVoiceErrorHandling:
     @pytest.mark.asyncio
     async def test_stt_transcribe_provider_error(self):
         """STT wraps provider errors into STTError."""
-        from nexus.voice.stt import STTEngine, STTError
+        from seyal_ai.voice.stt import STTEngine, STTError
 
         stt = STTEngine(provider_name="google_web")
         assert stt._provider is not None
@@ -644,7 +644,7 @@ class TestVoiceErrorHandling:
     @pytest.mark.asyncio
     async def test_tts_synthesize_with_fallback(self):
         """TTS falls back to pyttsx3 when edge fails."""
-        from nexus.voice.tts import TTSEngine, TTSError
+        from seyal_ai.voice.tts import TTSEngine, TTSError
 
         tts = TTSEngine(provider_name="edge", voice="")
         assert tts._provider is not None
@@ -662,7 +662,7 @@ class TestVoiceErrorHandling:
     @pytest.mark.asyncio
     async def test_tts_synthesize_both_fail(self):
         """TTSError raised when both primary and fallback fail."""
-        from nexus.voice.tts import TTSEngine, TTSError
+        from seyal_ai.voice.tts import TTSEngine, TTSError
 
         tts = TTSEngine(provider_name="edge", voice="")
         assert tts._provider is not None
@@ -705,24 +705,24 @@ class TestVoicePipelineFlow:
         brain._settings.voice.interrupt_enabled = True
 
         with (
-            patch("nexus.voice.audio_io.AudioRecorder"),
-            patch("nexus.voice.audio_io.AudioPlayer"),
-            patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"),
-            patch("nexus.voice.stt.STTEngine._init_provider"),
-            patch("nexus.voice.tts.TTSEngine._init_providers"),
+            patch("seyal_ai.voice.audio_io.AudioRecorder"),
+            patch("seyal_ai.voice.audio_io.AudioPlayer"),
+            patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"),
+            patch("seyal_ai.voice.stt.STTEngine._init_provider"),
+            patch("seyal_ai.voice.tts.TTSEngine._init_providers"),
         ):
-            from nexus.voice.pipeline import VoicePipeline
-            from nexus.voice.stt import TranscriptionResult
+            from seyal_ai.voice.pipeline import VoicePipeline
+            from seyal_ai.voice.stt import TranscriptionResult
 
             pipeline = VoicePipeline(brain=brain)
-            pipeline._stt.transcribe_with_language = AsyncMock(return_value=TranscriptionResult(text="hello nexus", language="en"))
+            pipeline._stt.transcribe_with_language = AsyncMock(return_value=TranscriptionResult(text="hello seyal_ai", language="en"))
             pipeline._speak_response = AsyncMock()
 
             audio_segment = _make_audio(0.5)
             await pipeline._process_speech(audio_segment)
 
             pipeline._stt.transcribe_with_language.assert_called_once()
-            brain.process.assert_called_once_with("hello nexus")
+            brain.process.assert_called_once_with("hello seyal_ai")
             pipeline._speak_response.assert_called_once_with("Speech response processed.")
 
     @pytest.mark.asyncio
@@ -732,14 +732,14 @@ class TestVoicePipelineFlow:
         brain.process = AsyncMock()
 
         with (
-            patch("nexus.voice.audio_io.AudioRecorder"),
-            patch("nexus.voice.audio_io.AudioPlayer"),
-            patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"),
-            patch("nexus.voice.stt.STTEngine._init_provider"),
-            patch("nexus.voice.tts.TTSEngine._init_providers"),
+            patch("seyal_ai.voice.audio_io.AudioRecorder"),
+            patch("seyal_ai.voice.audio_io.AudioPlayer"),
+            patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"),
+            patch("seyal_ai.voice.stt.STTEngine._init_provider"),
+            patch("seyal_ai.voice.tts.TTSEngine._init_providers"),
         ):
-            from nexus.voice.pipeline import PipelineState, VoicePipeline
-            from nexus.voice.stt import TranscriptionResult
+            from seyal_ai.voice.pipeline import PipelineState, VoicePipeline
+            from seyal_ai.voice.stt import TranscriptionResult
 
             pipeline = VoicePipeline(brain=brain)
             pipeline._stt.transcribe_with_language = AsyncMock(return_value=TranscriptionResult(text="   ", language="en"))
@@ -758,13 +758,13 @@ class TestVoicePipelineFlow:
         brain.process = AsyncMock(return_value="Processed text to voice.")
 
         with (
-            patch("nexus.voice.audio_io.AudioRecorder"),
-            patch("nexus.voice.audio_io.AudioPlayer"),
-            patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"),
-            patch("nexus.voice.stt.STTEngine._init_provider"),
-            patch("nexus.voice.tts.TTSEngine._init_providers"),
+            patch("seyal_ai.voice.audio_io.AudioRecorder"),
+            patch("seyal_ai.voice.audio_io.AudioPlayer"),
+            patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"),
+            patch("seyal_ai.voice.stt.STTEngine._init_provider"),
+            patch("seyal_ai.voice.tts.TTSEngine._init_providers"),
         ):
-            from nexus.voice.pipeline import VoicePipeline
+            from seyal_ai.voice.pipeline import VoicePipeline
 
             pipeline = VoicePipeline(brain=brain)
             pipeline._speak_response = AsyncMock()
@@ -780,13 +780,13 @@ class TestVoicePipelineFlow:
         brain = MagicMock()
 
         with (
-            patch("nexus.voice.audio_io.AudioRecorder"),
-            patch("nexus.voice.audio_io.AudioPlayer"),
-            patch("nexus.voice.vad.VoiceActivityDetector._load_vad_model"),
-            patch("nexus.voice.stt.STTEngine._init_provider"),
-            patch("nexus.voice.tts.TTSEngine._init_providers"),
+            patch("seyal_ai.voice.audio_io.AudioRecorder"),
+            patch("seyal_ai.voice.audio_io.AudioPlayer"),
+            patch("seyal_ai.voice.vad.VoiceActivityDetector._load_vad_model"),
+            patch("seyal_ai.voice.stt.STTEngine._init_provider"),
+            patch("seyal_ai.voice.tts.TTSEngine._init_providers"),
         ):
-            from nexus.voice.pipeline import VoicePipeline
+            from seyal_ai.voice.pipeline import VoicePipeline
 
             pipeline = VoicePipeline(brain=brain)
             pipeline._running = True
@@ -817,8 +817,8 @@ class TestVoiceAPIRoutes:
     def test_client(self):
         from fastapi.testclient import TestClient
 
-        from nexus.api.app import create_app
-        from nexus.core.config import get_settings
+        from seyal_ai.api.app import create_app
+        from seyal_ai.core.config import get_settings
 
         settings = get_settings()
         app = create_app(settings)
@@ -869,7 +869,7 @@ class TestVoiceAPIRoutes:
 
     def test_get_voice_status(self, test_client):
         client, _ = test_client
-        with patch("nexus.voice.tts.TTSEngine.list_voices", new_callable=AsyncMock) as mock_list:
+        with patch("seyal_ai.voice.tts.TTSEngine.list_voices", new_callable=AsyncMock) as mock_list:
             mock_list.return_value = [{"id": "v1", "name": "Voice 1"}]
             response = client.get("/api/voice/status")
             assert response.status_code == 200
@@ -893,14 +893,14 @@ class TestVoiceAPIRoutes:
         mock_brain.stop_voice.assert_called_once()
 
     def test_transcribe_endpoint(self, test_client):
-        from nexus.voice.audio_io import audio_to_wav_bytes
-        from nexus.voice.stt import TranscriptionResult
+        from seyal_ai.voice.audio_io import audio_to_wav_bytes
+        from seyal_ai.voice.stt import TranscriptionResult
 
         client, _ = test_client
         audio = _make_audio(0.5)
         wav_bytes = audio_to_wav_bytes(audio, 16000)
 
-        with patch("nexus.voice.stt.STTEngine.transcribe_with_language", new_callable=AsyncMock) as mock_stt:
+        with patch("seyal_ai.voice.stt.STTEngine.transcribe_with_language", new_callable=AsyncMock) as mock_stt:
             mock_stt.return_value = TranscriptionResult(text="transcribed speech", language="en")
             response = client.post(
                 "/api/voice/transcribe",
@@ -913,7 +913,7 @@ class TestVoiceAPIRoutes:
 
     def test_synthesize_endpoint(self, test_client):
         client, _ = test_client
-        with patch("nexus.voice.tts.TTSEngine.synthesize", new_callable=AsyncMock) as mock_synth:
+        with patch("seyal_ai.voice.tts.TTSEngine.synthesize", new_callable=AsyncMock) as mock_synth:
             mock_synth.return_value = b"fake_audio_mp3"
             response = client.post(
                 "/api/voice/synthesize",
@@ -933,7 +933,7 @@ class TestVoiceCLI:
 
     @pytest.mark.asyncio
     async def test_toggle_voice_turns_on(self):
-        from nexus.cli import _toggle_voice
+        from seyal_ai.cli import _toggle_voice
 
         brain = MagicMock()
         brain.is_voice_active = False
@@ -944,7 +944,7 @@ class TestVoiceCLI:
 
     @pytest.mark.asyncio
     async def test_toggle_voice_turns_off(self):
-        from nexus.cli import _toggle_voice
+        from seyal_ai.cli import _toggle_voice
 
         brain = MagicMock()
         brain.is_voice_active = True
@@ -954,7 +954,7 @@ class TestVoiceCLI:
         brain.stop_voice.assert_called_once()
 
     def test_print_voice_config_no_crash(self):
-        from nexus.cli import _print_voice_config
+        from seyal_ai.cli import _print_voice_config
 
         brain = MagicMock()
         brain.voice_pipeline = None
@@ -989,7 +989,7 @@ class TestVoiceModuleImports:
     """Verify all voice module exports are importable."""
 
     def test_import_voice_package(self):
-        from nexus.voice import (
+        from seyal_ai.voice import (
             AudioPlayer,
             AudioRecorder,
             InputMode,
@@ -1022,7 +1022,7 @@ class TestVoiceModuleImports:
         assert callable(wav_bytes_to_audio)
 
     def test_import_api_schemas(self):
-        from nexus.api.schemas import (
+        from seyal_ai.api.schemas import (
             VoiceConfigResponse,
             VoiceConfigUpdate,
             VoiceStatusResponse,

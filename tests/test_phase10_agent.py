@@ -1,5 +1,5 @@
 """
-Phase 10 — NEXUS Autonomous Planning & Multi-Step Execution Agent Tests.
+Phase 10 — Seyal AI Autonomous Planning & Multi-Step Execution Agent Tests.
 
 Validates:
 1. Goal understanding & multi-step plan decomposition.
@@ -9,8 +9,8 @@ Validates:
 5. Safe failure recovery, exponential backoff, and fallback tool selection.
 6. Clarification requests on underspecified goals.
 7. Action risk assessment & ConfirmationManager integration.
-8. Graceful cancellation ("Nexus stop").
-9. Immediate emergency kill switch ("NEXUS STOP").
+8. Graceful cancellation ("Seyal AI stop").
+9. Immediate emergency kill switch ("Seyal AI STOP").
 10. Result verification (artifacts, non-empty files, device deliveries).
 11. Brain routing and multi-step detection.
 12. FastAPI Task REST endpoints.
@@ -24,22 +24,22 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.api.app import create_app
-from nexus.core.brain import NexusBrain
-from nexus.planning.cancellation import (
+from seyal_ai.api.app import create_app
+from seyal_ai.core.brain import SeyalAiBrain
+from seyal_ai.planning.cancellation import (
     CancellationManager,
     CancellationToken,
     CancellationType,
     EmergencyStopException,
     TaskCancelledException,
 )
-from nexus.planning.executor import PlanExecutionEngine
-from nexus.planning.manager import TaskManager
-from nexus.planning.planner import TaskPlanner
-from nexus.planning.progress import ProgressTracker
-from nexus.planning.retry import ErrorCategory, RetrySystem
-from nexus.planning.tool_selector import ToolSelector
-from nexus.planning.types import (
+from seyal_ai.planning.executor import PlanExecutionEngine
+from seyal_ai.planning.manager import TaskManager
+from seyal_ai.planning.planner import TaskPlanner
+from seyal_ai.planning.progress import ProgressTracker
+from seyal_ai.planning.retry import ErrorCategory, RetrySystem
+from seyal_ai.planning.tool_selector import ToolSelector
+from seyal_ai.planning.types import (
     Plan,
     PlanStatus,
     PlanStep,
@@ -47,7 +47,7 @@ from nexus.planning.types import (
     StepStatus,
     TaskGoal,
 )
-from nexus.planning.verifier import ResultVerifier
+from seyal_ai.planning.verifier import ResultVerifier
 
 # ===========================================================================
 # 1. PLANNER & GOAL DECOMPOSITION TESTS
@@ -60,7 +60,7 @@ class TestTaskPlanner:
     @pytest.mark.asyncio
     async def test_resume_workflow_decomposition(self):
         planner = TaskPlanner()
-        goal = "Nexus, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
+        goal = "Seyal AI, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
         plan = await planner.create_plan(goal)
 
         assert plan.total_steps >= 5
@@ -244,12 +244,12 @@ class TestCancellationSystem:
         manager = CancellationManager()
 
         # Emergency hard stop
-        assert manager.detect_cancellation_intent("NEXUS STOP") == CancellationType.EMERGENCY
+        assert manager.detect_cancellation_intent("Seyal AI STOP") == CancellationType.EMERGENCY
         assert manager.detect_cancellation_intent("EMERGENCY STOP") == CancellationType.EMERGENCY
         assert manager.detect_cancellation_intent("STOP EVERYTHING") == CancellationType.EMERGENCY
 
         # Graceful soft stop
-        assert manager.detect_cancellation_intent("Nexus stop") == CancellationType.GRACEFUL
+        assert manager.detect_cancellation_intent("Seyal AI stop") == CancellationType.GRACEFUL
         assert manager.detect_cancellation_intent("cancel the task") == CancellationType.GRACEFUL
         assert manager.detect_cancellation_intent("abort") == CancellationType.GRACEFUL
 
@@ -335,7 +335,7 @@ class TestPlanExecutionEngine:
         engine = PlanExecutionEngine()
         planner = TaskPlanner()
 
-        goal = "Nexus, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
+        goal = "Seyal AI, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
         plan = await planner.create_plan(goal)
 
         res = await engine.execute_plan(plan)
@@ -369,7 +369,7 @@ class TestPlanExecutionEngine:
 
 
 class TestTaskManagerAndBrain:
-    """Tests for TaskManager coordination and NexusBrain multi-step routing."""
+    """Tests for TaskManager coordination and SeyalAiBrain multi-step routing."""
 
     @pytest.mark.asyncio
     async def test_task_manager_run_goal(self):
@@ -383,10 +383,10 @@ class TestTaskManagerAndBrain:
 
     @pytest.mark.asyncio
     async def test_brain_routes_multi_step_task(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         await brain.initialize()
 
-        prompt = "Nexus, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
+        prompt = "Seyal AI, find my latest resume, convert it to PDF, rename it Shanmuga_Resume, and send it to my phone."
         response = await brain.process(prompt)
 
         assert response is not None
@@ -394,10 +394,10 @@ class TestTaskManagerAndBrain:
 
     @pytest.mark.asyncio
     async def test_brain_emergency_stop_command(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         await brain.initialize()
 
-        response = await brain.process("NEXUS STOP")
+        response = await brain.process("Seyal AI STOP")
         assert "EMERGENCY STOP" in response
 
 

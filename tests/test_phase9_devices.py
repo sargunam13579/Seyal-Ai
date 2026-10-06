@@ -1,5 +1,5 @@
 """
-Comprehensive Test Suite for Phase 9 — NEXUS Unified Device System & Cross-Device Control.
+Comprehensive Test Suite for Phase 9 — Seyal AI Unified Device System & Cross-Device Control.
 
 Tests:
 1. DeviceNode models and DeviceStatusEnum (ONLINE, OFFLINE, CONNECTING, BUSY)
@@ -9,7 +9,7 @@ Tests:
 5. UnifiedDeviceManager (registry, NL target resolution, access revocation)
 6. Cross-Device LLM Tools Suite (5 tools)
 7. FastAPI Device Routes (/api/devices/*)
-8. NexusBrain integration
+8. SeyalAiBrain integration
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.api.app import create_app
-from nexus.core.brain import NexusBrain
-from nexus.devices.discovery import DeviceDiscoveryService
-from nexus.devices.handoff import TaskHandoffEngine
-from nexus.devices.manager import UnifiedDeviceManager
-from nexus.devices.transfer import SecureFileTransferBridge
-from nexus.devices.types import DeviceNode, DeviceStatusEnum, DeviceType
-from nexus.tools.devices.device_tools import (
+from seyal_ai.api.app import create_app
+from seyal_ai.core.brain import SeyalAiBrain
+from seyal_ai.devices.discovery import DeviceDiscoveryService
+from seyal_ai.devices.handoff import TaskHandoffEngine
+from seyal_ai.devices.manager import UnifiedDeviceManager
+from seyal_ai.devices.transfer import SecureFileTransferBridge
+from seyal_ai.devices.types import DeviceNode, DeviceStatusEnum, DeviceType
+from seyal_ai.tools.devices.device_tools import (
     ExecuteCrossDeviceCommandTool,
     HandoffTaskTool,
     ListDevicesTool,
@@ -89,7 +89,7 @@ class TestDeviceDiscoveryService:
         assert discovered[0].device_id == "dev_tab"
 
         await discovery.stop()
-        assert discovery.is_running is False
+        assert not discovery.is_running
 
 
 # ===========================================================================
@@ -230,13 +230,14 @@ class TestUnifiedDeviceManager:
         )
         await manager.register_device(phone_node)
 
-        # Execute command targeted at phone
+        # Execute command targeted at phone (disabled in Laptop-only mode)
         res = await manager.execute_cross_device_command(
             target_text_or_id="phone",
             command_type="volume_control",
             parameters={"action": "set", "level": 60},
         )
-        assert res["success"] is True
+        assert res["success"] is False
+        assert "Mobile execution is disabled" in res["output"]
         assert res["device_id"] == "phone_pixel"
 
 
@@ -251,14 +252,14 @@ class TestCrossDeviceToolsSuite:
     @pytest.mark.asyncio
     async def test_tools_suite(self, tmp_path: Path):
         manager = UnifiedDeviceManager()
-        phone_node = DeviceNode(
-            device_id="dev_phone",
-            name="Pixel 8",
-            alias="phone",
-            device_type=DeviceType.PHONE,
+        tablet_node = DeviceNode(
+            device_id="dev_tablet",
+            name="Galaxy Tab",
+            alias="tablet",
+            device_type=DeviceType.TABLET,
             status=DeviceStatusEnum.ONLINE,
         )
-        await manager.register_device(phone_node)
+        await manager.register_device(tablet_node)
 
         # 1. List devices
         list_tool = ListDevicesTool(manager=manager)
@@ -268,7 +269,7 @@ class TestCrossDeviceToolsSuite:
 
         # 2. Cross-device command
         cmd_tool = ExecuteCrossDeviceCommandTool(manager=manager)
-        res_cmd = await cmd_tool.execute(target_device="phone", command_type="media_control")
+        res_cmd = await cmd_tool.execute(target_device="tablet", command_type="media_control")
         assert res_cmd.success is True
 
         # 3. Transfer file
@@ -318,7 +319,7 @@ class TestFastAPIDeviceRoutes:
                 "/api/devices/register",
                 json={
                     "device_id": "test_tab_1",
-                    "name": "Nexus Tablet",
+                    "name": "Seyal AI Tablet",
                     "device_type": "tablet",
                     "capabilities": ["apps"],
                 },
@@ -351,14 +352,14 @@ class TestFastAPIDeviceRoutes:
 
 
 # ===========================================================================
-# 8. NEXUS BRAIN INTEGRATION TESTS
+# 8. Seyal AI BRAIN INTEGRATION TESTS
 # ===========================================================================
 
 
-class TestNexusBrainDeviceIntegration:
+class TestSeyalAiBrainDeviceIntegration:
     """Tests for Brain device_manager property."""
 
     def test_brain_device_manager(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         assert brain.device_manager is not None
         assert brain.device_manager.get_device("host_laptop") is not None

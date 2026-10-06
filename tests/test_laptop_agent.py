@@ -1,5 +1,5 @@
 """
-Comprehensive test suite for Phase 4 — NEXUS Laptop Agent for Windows.
+Comprehensive test suite for Phase 4 — Seyal AI Laptop Agent for Windows.
 
 Tests every system-level capability:
 - Applications (open, close, switch, search, list)
@@ -18,25 +18,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.agents.laptop.agent import LaptopAgent, LaptopAgentClient
-from nexus.agents.laptop.protocol import (
+from seyal_ai.agents.laptop.agent import LaptopAgent, LaptopAgentClient
+from seyal_ai.agents.laptop.protocol import (
     DeviceRegistration,
     DeviceStatus,
 )
-from nexus.api.app import create_app
-from nexus.security.terminal_security import (
+from seyal_ai.api.app import create_app
+from seyal_ai.security.terminal_security import (
     CommandSafetyStatus,
     TerminalSecurityClassifier,
 )
-from nexus.tools.base import RiskLevel
-from nexus.tools.system.apps import (
+from seyal_ai.tools.base import RiskLevel
+from seyal_ai.tools.system.apps import (
     CloseApplicationTool,
     ListApplicationsTool,
     OpenApplicationTool,
     SearchApplicationsTool,
     SwitchApplicationTool,
 )
-from nexus.tools.system.files import (
+from seyal_ai.tools.system.files import (
     CopyFileTool,
     CreateFileTool,
     CreateFolderTool,
@@ -47,14 +47,14 @@ from nexus.tools.system.files import (
     RenameFileTool,
     SearchFilesTool,
 )
-from nexus.tools.system.os_control import (
+from seyal_ai.tools.system.os_control import (
     ClipboardTool,
     ExtendedSystemInfoTool,
     LockScreenTool,
     ScreenshotTool,
     VolumeControlTool,
 )
-from nexus.tools.terminal.command import ExecuteCommandTool
+from seyal_ai.tools.terminal.command import ExecuteCommandTool
 
 # ===========================================================================
 # 1. APPLICATION TOOLS TESTS
@@ -161,7 +161,7 @@ class TestFileTools:
         # 1. Create file
         res_create = await create_tool.execute(
             path=str(test_file),
-            content="Line 1: Buy groceries\nLine 2: Build NEXUS\nLine 3: Test agent",
+            content="Line 1: Buy groceries\nLine 2: Build Seyal AI\nLine 3: Test agent",
         )
         assert res_create.success
         assert test_file.exists()
@@ -173,7 +173,7 @@ class TestFileTools:
         # 3. Read file
         res_read = await read_tool.execute(path=str(test_file), max_lines=2, start_line=2)
         assert res_read.success
-        assert "Line 2: Build NEXUS" in res_read.output
+        assert "Line 2: Build Seyal AI" in res_read.output
         assert "Line 3: Test agent" in res_read.output
         assert "Line 1" not in res_read.output
 
@@ -193,10 +193,10 @@ class TestFileTools:
             path=str(test_file),
             mode="replace",
             target_text="Hello World",
-            content="Hello NEXUS",
+            content="Hello Seyal AI",
         )
         assert res_rep.success
-        assert "Hello NEXUS" in test_file.read_text(encoding="utf-8")
+        assert "Hello Seyal AI" in test_file.read_text(encoding="utf-8")
 
         # 3. Overwrite mode
         res_over = await tool.execute(path=str(test_file), mode="overwrite", content="Brand New")
@@ -334,7 +334,7 @@ class TestOSControlTools:
         assert not res_err.success
 
         # Set clipboard
-        res_set = await tool.execute(action="set", text="NEXUS Unit Test Clipboard")
+        res_set = await tool.execute(action="set", text="Seyal AI Unit Test Clipboard")
         assert res_set.success
 
         # Get clipboard
@@ -420,7 +420,7 @@ class TestTerminalSecurityAndExecution:
             "python --version",
             "whoami",
             "ipconfig",
-            "echo Hello NEXUS",
+            "echo Hello Seyal AI",
             "type file.txt",
         ]
 
@@ -434,9 +434,9 @@ class TestTerminalSecurityAndExecution:
         tool = ExecuteCommandTool()
         assert tool.name == "execute_command"
 
-        res = await tool.execute(command="echo NEXUS_RUNNING")
+        res = await tool.execute(command="echo SEYAL_AI_RUNNING")
         assert res.success
-        assert "NEXUS_RUNNING" in res.output
+        assert "SEYAL_AI_RUNNING" in res.output
         assert res.data["exit_code"] == 0
 
     @pytest.mark.asyncio
@@ -445,7 +445,7 @@ class TestTerminalSecurityAndExecution:
 
         res = await tool.execute(command="format C:")
         assert not res.success
-        assert "blocked by NEXUS Security Guard" in res.output
+        assert "blocked by Seyal AI Security Guard" in res.output
 
     @pytest.mark.asyncio
     async def test_execute_command_tool_error_capture(self):
@@ -493,10 +493,10 @@ class TestLaptopAgentCore:
         client = LaptopAgentClient(agent=agent, auth_secret="my-test-secret")
 
         headers = client._generate_auth_headers("/laptop/register", "test_payload")
-        assert "X-Nexus-Device-Id" in headers
-        assert "X-Nexus-Timestamp" in headers
-        assert "X-Nexus-Signature" in headers
-        assert headers["X-Nexus-Device-Id"] == agent.device_id
+        assert "X-Seyal AI-Device-Id" in headers
+        assert "X-Seyal AI-Timestamp" in headers
+        assert "X-Seyal AI-Signature" in headers
+        assert headers["X-Seyal AI-Device-Id"] == agent.device_id
 
 
 # ===========================================================================

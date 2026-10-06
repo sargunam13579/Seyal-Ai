@@ -1,5 +1,5 @@
 """
-Comprehensive test suite for Phase 5 — NEXUS Vision & Screen Understanding Engine.
+Comprehensive test suite for Phase 5 — Seyal AI Vision & Screen Understanding Engine.
 
 Tests:
 1. ScreenPrivacyManager (permissions, sensitive window filter, audit logs)
@@ -20,9 +20,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from PIL import Image
 
-from nexus.api.app import create_app
-from nexus.tools.base import RiskLevel
-from nexus.tools.vision.screen_tools import (
+from seyal_ai.api.app import create_app
+from seyal_ai.tools.base import RiskLevel
+from seyal_ai.tools.vision.screen_tools import (
     ClickElementTool,
     DescribeScreenTool,
     GetActiveWindowTool,
@@ -31,15 +31,15 @@ from nexus.tools.vision.screen_tools import (
     TypeIntoElementTool,
     get_vision_tools,
 )
-from nexus.vision.analyzer import ScreenAnalysisReport, ScreenAnalyzer
-from nexus.vision.capture import ScreenCaptureController, ScreenCaptureResult, WindowInfo
-from nexus.vision.ocr import OCRResult, ScreenOCR, TextBlock
-from nexus.vision.privacy import (
+from seyal_ai.vision.analyzer import ScreenAnalysisReport, ScreenAnalyzer
+from seyal_ai.vision.capture import ScreenCaptureController, ScreenCaptureResult, WindowInfo
+from seyal_ai.vision.ocr import OCRResult, ScreenOCR, TextBlock
+from seyal_ai.vision.privacy import (
     ScreenAnalysisLog,
     ScreenPermissionMode,
     ScreenPrivacyManager,
 )
-from nexus.vision.ui_detector import UIElement, UIElementDetector, UIElementType
+from seyal_ai.vision.ui_detector import UIElement, UIElementDetector, UIElementType
 
 # ===========================================================================
 # 1. SCREEN PRIVACY MANAGER TESTS
@@ -81,9 +81,9 @@ class TestScreenPrivacyManager:
 
         # Normal applications should be permitted
         safe_windows = [
-            "main.py - nexus - Visual Studio Code",
+            "main.py - seyal_ai - Visual Studio Code",
             "Command Prompt",
-            "NEXUS Architecture - Google Docs - Chrome",
+            "Seyal AI Architecture - Google Docs - Chrome",
             "Spotify Free",
         ]
         for win in safe_windows:
@@ -393,7 +393,7 @@ class TestVisionToolsSuite:
         assert tool.name == "type_into_element"
 
         with patch("pyautogui.write"):
-            sample_text = "print('Hello NEXUS')"
+            sample_text = "print('Hello Seyal AI')"
             res = await tool.execute(text=sample_text)
             assert res.success is True
             assert f"{len(sample_text)} characters" in res.output
@@ -458,7 +458,7 @@ class TestFastAPIVisionRoutes:
             assert "buttons" in data_desc
 
             # 2. Locate (Mocked find)
-            with patch("nexus.api.routes.vision._analyzer.locate_element") as mock_loc:
+            with patch("seyal_ai.api.routes.vision._analyzer.locate_element") as mock_loc:
                 mock_el = UIElement("btn-1", UIElementType.BUTTON, "Run", 1600, 80, 80, 32)
                 mock_loc.return_value = (mock_el, "The Run button is at top-right")
                 res_loc = await ac.post("/api/vision/screen/locate", json={"element_name": "Run"})

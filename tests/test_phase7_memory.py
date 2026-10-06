@@ -1,5 +1,5 @@
 """
-Comprehensive Test Suite for Phase 7 — NEXUS Reliable Memory & Context System.
+Comprehensive Test Suite for Phase 7 — Seyal AI Reliable Memory & Context System.
 
 Tests:
 1. MemoryRecord & MemoryCategory models
@@ -9,7 +9,7 @@ Tests:
 5. MemoryManager & Auto-Learning (preference extraction from natural conversation)
 6. LLM Memory Tools Suite (store, recall, search, delete, clear, settings)
 7. FastAPI Memory Endpoints (/api/memory/*)
-8. NexusBrain integration
+8. SeyalAiBrain integration
 """
 
 from __future__ import annotations
@@ -19,14 +19,14 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.api.app import create_app
-from nexus.core.brain import NexusBrain
-from nexus.memory.context_resolver import ContextResolver
-from nexus.memory.manager import MemoryManager
-from nexus.memory.privacy import MemoryPrivacyFilter
-from nexus.memory.storage import MemoryStorage
-from nexus.memory.types import MemoryCategory, MemoryRecord, PrivacyLevel
-from nexus.tools.memory.memory_tools import (
+from seyal_ai.api.app import create_app
+from seyal_ai.core.brain import SeyalAiBrain
+from seyal_ai.memory.context_resolver import ContextResolver
+from seyal_ai.memory.manager import MemoryManager
+from seyal_ai.memory.privacy import MemoryPrivacyFilter
+from seyal_ai.memory.storage import MemoryStorage
+from seyal_ai.memory.types import MemoryCategory, MemoryRecord, PrivacyLevel
+from seyal_ai.tools.memory.memory_tools import (
     ClearMemoryTool,
     DeleteMemoryTool,
     ManageMemorySettingsTool,
@@ -220,7 +220,7 @@ class TestContextResolver:
         resolver.update_state(
             last_downloaded_file="C:/Users/user/Downloads/interview_questions.pdf",
             last_copied_text="Python AsyncIO Architecture",
-            last_mentioned_url="https://github.com/nexus/nexus-ai",
+            last_mentioned_url="https://github.com/seyal_ai/seyal_ai-ai",
         )
 
         # 1. "Open the file" / "Move that file"
@@ -233,20 +233,20 @@ class TestContextResolver:
 
         # 3. "Open that link"
         res_link = await resolver.resolve_reference("Open that link")
-        assert res_link.get("target_url") == "https://github.com/nexus/nexus-ai"
+        assert res_link.get("target_url") == "https://github.com/seyal_ai/seyal_ai-ai"
 
     @pytest.mark.asyncio
     async def test_context_prompt_building(self, tmp_path: Path):
         storage = MemoryStorage(storage_path=tmp_path / "mem.json")
         await storage.store("editor", "VS Code", category=MemoryCategory.USER_PREFERENCE)
-        await storage.store("project_name", "NEXUS AI", category=MemoryCategory.USER_DEFINED_INFO)
+        await storage.store("project_name", "Seyal AI AI", category=MemoryCategory.USER_DEFINED_INFO)
 
         resolver = ContextResolver(storage=storage)
         resolver.update_state(active_task_description="Build Phase 7 Memory System")
 
         prompt_str = await resolver.build_context_prompt()
         assert "VS Code" in prompt_str
-        assert "NEXUS AI" in prompt_str
+        assert "Seyal AI AI" in prompt_str
         assert "Build Phase 7 Memory System" in prompt_str
 
 
@@ -396,16 +396,16 @@ class TestFastAPIMemoryRoutes:
 
 
 # ===========================================================================
-# 8. NEXUS BRAIN MEMORY INTEGRATION TESTS
+# 8. Seyal AI BRAIN MEMORY INTEGRATION TESTS
 # ===========================================================================
 
 
-class TestNexusBrainMemoryIntegration:
+class TestSeyalAiBrainMemoryIntegration:
     """Tests for Brain auto-learning during dialogue processing."""
 
     @pytest.mark.asyncio
     async def test_brain_auto_learn_on_process(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         assert brain.memory_manager is not None
 
         # Patch orchestrator so no live LLM call is attempted

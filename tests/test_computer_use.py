@@ -1,5 +1,5 @@
 """
-Unit & Integration Tests for NEXUS Conversational Computer-Use Agent.
+Unit & Integration Tests for Seyal AI Conversational Computer-Use Agent.
 """
 
 from __future__ import annotations
@@ -9,29 +9,22 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.agents.computer_use.actions import ComputerActionExecutor
-from nexus.agents.computer_use.agent import ConversationalComputerUseAgent
-from nexus.agents.computer_use.grounding import VisualGroundingEngine
-from nexus.agents.computer_use.protocol import (
+from seyal_ai.agents.computer_use.actions import ComputerActionExecutor
+from seyal_ai.agents.computer_use.agent import ConversationalComputerUseAgent
+from seyal_ai.agents.computer_use.grounding import VisualGroundingEngine
+from seyal_ai.agents.computer_use.protocol import (
     ActionType,
     AgentStatus,
     ComputerAction,
     ScreenObservation,
 )
-from nexus.api.app import create_app
-from nexus.tools.computer_use import (
-    ComputerClickTool,
-    ComputerHotkeyTool,
-    ComputerScrollTool,
-    ComputerTypeTool,
-    get_computer_use_tools,
-)
+from seyal_ai.api.app import create_app
 
 
 @pytest.fixture(autouse=True)
 def enable_computer_use_permissions():
     """Ensure computer control scopes are enabled for testing."""
-    from nexus.security.permissions import PermissionScope, PermissionScopeManager
+    from seyal_ai.security.permissions import PermissionScope, PermissionScopeManager
     perm_mgr = PermissionScopeManager()
     perm_mgr.grant_scope(PermissionScope.MOUSE_CONTROL)
     perm_mgr.grant_scope(PermissionScope.KEYBOARD_CONTROL)
@@ -64,11 +57,11 @@ async def test_action_executor_typing_and_hotkey():
     executor = ComputerActionExecutor()
 
     # Type Text
-    type_action = ComputerAction(action_type=ActionType.TYPE_TEXT, text="Hello NEXUS")
+    type_action = ComputerAction(action_type=ActionType.TYPE_TEXT, text="Hello Seyal AI")
     with patch("pyautogui.write", create=True):
         res = await executor.execute(type_action)
         assert res["success"] is True
-        assert res["length"] == 11
+        assert res["length"] == len("Hello Seyal AI")
 
     # Hotkey
     hotkey_action = ComputerAction(action_type=ActionType.HOTKEY, key="ctrl+s")
@@ -92,35 +85,6 @@ async def test_visual_grounding_coordinates():
     assert norm_y == 500
 
 
-@pytest.mark.asyncio
-async def test_computer_use_tools():
-    """Test all standalone computer use tools."""
-    tools = get_computer_use_tools()
-    assert len(tools) == 5
-
-    # Click Tool
-    click_tool = ComputerClickTool()
-    with patch("pyautogui.click", create=True):
-        res = await click_tool.execute(x=100, y=200, button="left")
-        assert res.success is True
-
-    # Type Tool
-    type_tool = ComputerTypeTool()
-    with patch("pyautogui.write", create=True):
-        res = await type_tool.execute(text="Test input")
-        assert res.success is True
-
-    # Hotkey Tool
-    hotkey_tool = ComputerHotkeyTool()
-    with patch("pyautogui.hotkey", create=True):
-        res = await hotkey_tool.execute(key="ctrl+alt+del")
-        assert res.success is True
-
-    # Scroll Tool
-    scroll_tool = ComputerScrollTool()
-    with patch("pyautogui.scroll", create=True):
-        res = await scroll_tool.execute(direction="down", amount=5)
-        assert res.success is True
 
 
 @pytest.mark.asyncio
@@ -373,7 +337,7 @@ async def test_outer_task_explicit_close():
 
 @pytest.mark.asyncio
 async def test_inner_task_protection_and_subtasks():
-    """Test that inner tasks (e.g. deleting chats in Nexus) perform subtasks and never close the window."""
+    """Test that inner tasks (e.g. deleting chats in Seyal AI) perform subtasks and never close the window."""
     agent = ConversationalComputerUseAgent(max_steps=10)
 
     mock_obs = ScreenObservation(

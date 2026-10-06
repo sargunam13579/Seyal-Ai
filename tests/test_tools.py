@@ -1,13 +1,13 @@
-"""Tests for the NEXUS tool system — registry, executor, and starter tools."""
+"""Tests for the Seyal AI tool system — registry, executor, and starter tools."""
 
 from __future__ import annotations
 
 import pytest
 
-from nexus.tools.base import RiskLevel, TargetDevice
-from nexus.tools.executor import ToolExecutor
-from nexus.tools.registry import ToolRegistry
-from nexus.tools.system.basic import (
+from seyal_ai.tools.base import RiskLevel, TargetDevice
+from seyal_ai.tools.executor import ToolExecutor
+from seyal_ai.tools.registry import ToolRegistry
+from seyal_ai.tools.system.basic import (
     GetCurrentTimeTool,
     GetSystemInfoTool,
     OpenApplicationTool,
@@ -192,7 +192,7 @@ class TestArchiveAndWindowTools:
 
     @pytest.mark.asyncio
     async def test_compress_and_extract_archive(self, tmp_path):
-        from nexus.tools.system.files import CompressFilesTool, ExtractArchiveTool
+        from seyal_ai.tools.system.files import CompressFilesTool, ExtractArchiveTool
 
         compress_tool = CompressFilesTool()
         extract_tool = ExtractArchiveTool()
@@ -226,7 +226,7 @@ class TestArchiveAndWindowTools:
 
     @pytest.mark.asyncio
     async def test_window_state_tool(self):
-        from nexus.tools.system.apps import WindowStateTool
+        from seyal_ai.tools.system.apps import WindowStateTool
 
         tool = WindowStateTool()
         assert tool.name == "window_state"

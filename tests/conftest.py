@@ -1,5 +1,5 @@
 """
-NEXUS Test Configuration.
+Seyal AI Test Configuration.
 
 Shared fixtures and configuration for the test suite.
 """
@@ -13,9 +13,9 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-# Set test environment before importing nexus modules
-os.environ["NEXUS_ENV"] = "test"
-os.environ["NEXUS_LOG_LEVEL"] = "DEBUG"
+# Set test environment before importing seyal_ai modules
+os.environ["SEYAL_AI_ENV"] = "test"
+os.environ["SEYAL_AI_LOG_LEVEL"] = "DEBUG"
 
 
 @pytest.fixture(scope="session")
@@ -29,9 +29,9 @@ def event_loop():
 @pytest_asyncio.fixture
 async def test_db(tmp_path: Path):
     """Provide a temporary test database."""
-    from nexus.database.engine import close_engine, init_engine
+    from seyal_ai.database.engine import close_engine, init_engine
 
-    db_path = tmp_path / "test_nexus.db"
+    db_path = tmp_path / "test_seyal_ai.db"
     db_url = f"sqlite+aiosqlite:///{db_path}"
     engine = await init_engine(db_url, echo=False)
     yield engine
@@ -41,7 +41,7 @@ async def test_db(tmp_path: Path):
 @pytest.fixture
 def tool_registry():
     """Provide a fresh ToolRegistry."""
-    from nexus.tools.registry import ToolRegistry
+    from seyal_ai.tools.registry import ToolRegistry
 
     return ToolRegistry()
 
@@ -49,6 +49,6 @@ def tool_registry():
 @pytest.fixture
 def starter_tools():
     """Provide all starter tools."""
-    from nexus.tools.system.basic import get_starter_tools
+    from seyal_ai.tools.system.basic import get_starter_tools
 
     return get_starter_tools()

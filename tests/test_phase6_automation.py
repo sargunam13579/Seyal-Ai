@@ -1,5 +1,5 @@
 """
-Comprehensive Test Suite for Phase 6 — NEXUS Browser & Desktop Application Automation.
+Comprehensive Test Suite for Phase 6 — Seyal AI Browser & Desktop Application Automation.
 
 Tests:
 1. BrowserController & Tab Management
@@ -22,17 +22,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.api.app import create_app
-from nexus.automation.app_controller import ActiveAppInfo, DesktopAppController
-from nexus.automation.error_recovery import with_retry
-from nexus.automation.ui_interaction import DesktopUIInteraction
-from nexus.automation.workflow import MultiStepWorkflowEngine, WorkflowResult
-from nexus.browser.controller import BrowserController, TabInfo
-from nexus.browser.downloader import BrowserDownloader, DownloadResult
-from nexus.browser.interaction import BrowserInteraction
-from nexus.browser.navigator import BrowserNavigator
-from nexus.browser.page_reader import PageContent, PageLink, PageReader
-from nexus.tools.browser.web_tools import (
+from seyal_ai.api.app import create_app
+from seyal_ai.automation.app_controller import ActiveAppInfo, DesktopAppController
+from seyal_ai.automation.error_recovery import with_retry
+from seyal_ai.automation.ui_interaction import DesktopUIInteraction
+from seyal_ai.automation.workflow import MultiStepWorkflowEngine, WorkflowResult
+from seyal_ai.browser.controller import BrowserController, TabInfo
+from seyal_ai.browser.downloader import BrowserDownloader, DownloadResult
+from seyal_ai.browser.interaction import BrowserInteraction
+from seyal_ai.browser.navigator import BrowserNavigator
+from seyal_ai.browser.page_reader import PageContent, PageLink, PageReader
+from seyal_ai.tools.browser.web_tools import (
     ClickWebElementTool,
     DownloadWebFileTool,
     ManageWebTabsTool,
@@ -42,7 +42,7 @@ from nexus.tools.browser.web_tools import (
     WebSearchBrowserTool,
     get_browser_tools,
 )
-from nexus.tools.desktop.app_tools import (
+from seyal_ai.tools.desktop.app_tools import (
     InteractAppTool,
     MultiStepTaskTool,
     ScrollAppTool,
@@ -121,7 +121,7 @@ class TestBrowserController:
 
             # 7. Teardown
             await ctrl.stop()
-            assert ctrl.is_running is False
+            assert not ctrl.is_running
 
 
 # ===========================================================================
@@ -188,7 +188,7 @@ class TestBrowserInteraction:
 
             # Type
             typed = await interaction.type_text(
-                target="#username", text="nexus_user", press_enter=True
+                target="#username", text="seyal_user", press_enter=True
             )
             assert typed is True
 
@@ -541,7 +541,7 @@ class TestFastAPIBrowserAndAutomationRoutes:
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             # 1. Navigate
             with patch(
-                "nexus.api.routes.browser._navigator.navigate",
+                "seyal_ai.api.routes.browser._navigator.navigate",
                 return_value={"title": "Test", "url": "https://test.com", "status_code": 200},
             ):
                 res = await ac.post("/api/browser/navigate", json={"url": "https://test.com"})
@@ -550,7 +550,7 @@ class TestFastAPIBrowserAndAutomationRoutes:
 
             # 2. Search
             with patch(
-                "nexus.api.routes.browser._navigator.search",
+                "seyal_ai.api.routes.browser._navigator.search",
                 return_value={"title": "Search", "url": "https://ddg.com", "status_code": 200},
             ):
                 res_search = await ac.post("/api/browser/search", json={"query": "python"})
@@ -558,14 +558,14 @@ class TestFastAPIBrowserAndAutomationRoutes:
 
             # 3. Content
             mock_content = PageContent("Test Page", "https://t.com", "Some text", ["H1"], [], 2)
-            with patch("nexus.api.routes.browser._reader.read", return_value=mock_content):
+            with patch("seyal_ai.api.routes.browser._reader.read", return_value=mock_content):
                 res_content = await ac.get("/api/browser/content")
                 assert res_content.status_code == 200
                 assert res_content.json()["title"] == "Test Page"
 
             # 4. Tabs
             with patch(
-                "nexus.api.routes.browser._browser_ctrl.list_tabs",
+                "seyal_ai.api.routes.browser._browser_ctrl.list_tabs",
                 return_value=[TabInfo(0, "T1", "https://t1.com", True)],
             ):
                 res_tabs = await ac.post("/api/browser/tabs", json={"action": "list"})
@@ -580,7 +580,7 @@ class TestFastAPIBrowserAndAutomationRoutes:
             # 1. Active App
             mock_app = ActiveAppInfo("code.exe", "VS Code", 1234, 5678, 0, 0, 1920, 1080)
             with patch(
-                "nexus.api.routes.automation._app_ctrl.get_active_app", return_value=mock_app
+                "seyal_ai.api.routes.automation._app_ctrl.get_active_app", return_value=mock_app
             ):
                 res_app = await ac.get("/api/automation/app/active")
                 assert res_app.status_code == 200
@@ -589,7 +589,7 @@ class TestFastAPIBrowserAndAutomationRoutes:
             # 2. Workflow Execute
             mock_wf = WorkflowResult(True, "Workflow completed successfully", [])
             with patch(
-                "nexus.api.routes.automation._workflow_engine.execute_web_search_and_read",
+                "seyal_ai.api.routes.automation._workflow_engine.execute_web_search_and_read",
                 return_value=mock_wf,
             ):
                 res_wf = await ac.post(

@@ -11,21 +11,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from nexus.api.app import create_app
-from nexus.core.brain import NexusBrain
-from nexus.core.config import NexusSettings
-from nexus.core.confirmation import (
+from seyal_ai.api.app import create_app
+from seyal_ai.core.brain import SeyalAiBrain
+from seyal_ai.core.config import SeyalAiSettings
+from seyal_ai.core.confirmation import (
     ConfirmationAction,
     ConfirmationManager,
     ConfirmationStatus,
 )
-from nexus.core.identity import (
+from seyal_ai.core.identity import (
     DEFAULT_ASSISTANT_NAME,
     DEFAULT_WAKE_WORD,
     IdentityManager,
 )
-from nexus.llm.prompts.system import build_system_prompt
-from nexus.voice.wake_word import WakeWordDetector
+from seyal_ai.llm.prompts.system import build_system_prompt
+from seyal_ai.voice.wake_word import WakeWordDetector
 
 # ===========================================================================
 # 1. Identity Manager Tests
@@ -94,24 +94,24 @@ class TestIdentityManager:
     def test_persistence_save_and_reload(self, tmp_path: Path):
         id_file = tmp_path / "identity.json"
         mgr1 = IdentityManager(storage_path=id_file)
-        mgr1.set_name("Jarvis")
-        mgr1.add_alias("J")
+        mgr1.set_name("Aria")
+        mgr1.add_alias("A")
         mgr1.set_user_name("Alice")
         mgr1.set_require_wake_word(True)
 
         assert id_file.exists()
         saved_data = json.loads(id_file.read_text(encoding="utf-8"))
-        assert saved_data["assistant_name"] == "Jarvis"
-        assert saved_data["wake_word"] == "Jarvis"
-        assert saved_data["aliases"] == ["J"]
+        assert saved_data["assistant_name"] == "Aria"
+        assert saved_data["wake_word"] == "Aria"
+        assert saved_data["aliases"] == ["A"]
         assert saved_data["user_name"] == "Alice"
         assert saved_data["require_wake_word"] is True
 
         # Reload in a new manager
         mgr2 = IdentityManager(storage_path=id_file)
-        assert mgr2.name == "Jarvis"
-        assert mgr2.wake_word == "Jarvis"
-        assert mgr2.aliases == ["J"]
+        assert mgr2.name == "Aria"
+        assert mgr2.wake_word == "Aria"
+        assert mgr2.aliases == ["A"]
         assert mgr2.user_name == "Alice"
         assert mgr2.config.require_wake_word is True
 
@@ -258,50 +258,50 @@ class TestWakeWordDetector:
     """Tests for WakeWordDetector matching prefixes, aliases, and commands."""
 
     def test_direct_wake_word(self):
-        detector = WakeWordDetector(wake_words=["NEXUS"])
-        match = detector.detect("Nexus, open Chrome")
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+        match = detector.detect("Seyal AI, open Chrome")
         assert match.matched is True
-        assert match.wake_word == "NEXUS"
+        assert match.wake_word == "Seyal AI"
         assert match.command == "open Chrome"
 
     def test_prefix_wake_word(self):
-        detector = WakeWordDetector(wake_words=["NEXUS"])
-        match1 = detector.detect("Hey Nexus, what time is it?")
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+        match1 = detector.detect("Hey Seyal AI, what time is it?")
         assert match1.matched is True
         assert match1.prefix == "hey"
-        assert match1.wake_word == "NEXUS"
+        assert match1.wake_word == "Seyal AI"
         assert match1.command == "what time is it"
 
-        match2 = detector.detect("OK Nexus, turn up the volume")
+        match2 = detector.detect("OK Seyal AI, turn up the volume")
         assert match2.matched is True
         assert match2.prefix == "ok"
         assert match2.command == "turn up the volume"
 
-        match3 = detector.detect("Hi Nexus, check battery")
+        match3 = detector.detect("Hi Seyal AI, check battery")
         assert match3.matched is True
         assert match3.prefix == "hi"
         assert match3.command == "check battery"
 
     def test_standalone_wake_word_no_command(self):
-        detector = WakeWordDetector(wake_words=["NEXUS"])
-        match1 = detector.detect("Nexus")
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+        match1 = detector.detect("Seyal AI")
         assert match1.matched is True
         assert match1.command == ""
         assert not match1.has_command
 
-        match2 = detector.detect("Hey Nexus")
+        match2 = detector.detect("Hey Seyal AI")
         assert match2.matched is True
         assert match2.prefix == "hey"
         assert match2.command == ""
 
     def test_trailing_wake_word(self):
-        detector = WakeWordDetector(wake_words=["NEXUS"])
-        match = detector.detect("Open Chrome, Nexus")
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+        match = detector.detect("Open Chrome, Seyal AI")
         assert match.matched is True
         assert match.command == "Open Chrome"
 
     def test_alias_detection(self):
-        detector = WakeWordDetector(wake_words=["NEXUS", "Aria", "Ari"])
+        detector = WakeWordDetector(wake_words=["Seyal AI", "Aria", "Ari"])
         match_aria = detector.detect("Hey Aria, play some music")
         assert match_aria.matched is True
         assert match_aria.wake_word == "Aria"
@@ -313,19 +313,19 @@ class TestWakeWordDetector:
         assert match_ari.command == "what is 2+2"
 
     def test_name_change_stops_old_name_unless_in_aliases(self):
-        detector = WakeWordDetector(wake_words=["NEXUS"])
-        # Initially NEXUS matches
-        assert detector.detect("Nexus, open Chrome").matched is True
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+        # Initially Seyal AI matches
+        assert detector.detect("Seyal AI, open Chrome").matched is True
         assert detector.detect("Aria, open Chrome").matched is False
 
-        # Change wake words to Aria (without NEXUS alias)
+        # Change wake words to Aria (without Seyal AI alias)
         detector.update_wake_words(primary="Aria", aliases=[])
-        assert detector.detect("Nexus, open Chrome").matched is False
+        assert detector.detect("Seyal AI, open Chrome").matched is False
         assert detector.detect("Aria, open Chrome").matched is True
 
-        # Change wake words to Aria WITH NEXUS as alias
-        detector.update_wake_words(primary="Aria", aliases=["NEXUS"])
-        assert detector.detect("Nexus, open Chrome").matched is True
+        # Change wake words to Aria WITH Seyal AI as alias
+        detector.update_wake_words(primary="Aria", aliases=["Seyal AI"])
+        assert detector.detect("Seyal AI, open Chrome").matched is True
         assert detector.detect("Aria, open Chrome").matched is True
 
 
@@ -338,9 +338,9 @@ class TestSystemPromptDynamicIdentity:
     """Tests for dynamic prompt injection with custom assistant identity."""
 
     def test_default_prompt_name(self):
-        prompt = build_system_prompt(assistant_name="NEXUS")
-        assert "You are NEXUS" in prompt
-        assert "Assistant Name: NEXUS" in prompt
+        prompt = build_system_prompt(assistant_name="Seyal AI")
+        assert "You are Seyal AI" in prompt
+        assert "Assistant Name: Seyal AI" in prompt
 
     def test_custom_prompt_name(self):
         prompt = build_system_prompt(assistant_name="Aria", user_name="Alice")
@@ -349,14 +349,14 @@ class TestSystemPromptDynamicIdentity:
         assert "User: Alice" in prompt
 
 
-class TestNexusBrainIdentityFlow:
-    """Tests for complete name change and confirmation workflow through NexusBrain."""
+class TestSeyalAiBrainIdentityFlow:
+    """Tests for complete name change and confirmation workflow through SeyalAiBrain."""
 
     @pytest.mark.asyncio
     async def test_name_change_confirmation_flow(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        brain = NexusBrain(settings=settings, identity=id_mgr)
+        brain = SeyalAiBrain(settings=settings, identity=id_mgr)
         await brain.initialize()
 
         assert brain.name == "Seyal AI"
@@ -379,13 +379,13 @@ class TestNexusBrainIdentityFlow:
 
     @pytest.mark.asyncio
     async def test_name_change_rejected_flow(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        brain = NexusBrain(settings=settings, identity=id_mgr)
+        brain = SeyalAiBrain(settings=settings, identity=id_mgr)
         await brain.initialize()
 
         # 1. User asks to change name
-        await brain.process("Change your name to Jarvis")
+        await brain.process("Change your name to Aria")
         assert brain.confirmation.has_pending
 
         # 2. User rejects
@@ -404,10 +404,10 @@ class TestIdentityAPIRoutes:
     """Tests for `/api/identity` and `/api/wake-word` endpoints."""
 
     def test_get_identity_endpoint(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         app = create_app(settings)
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        mock_brain = NexusBrain(settings=settings, identity=id_mgr)
+        mock_brain = SeyalAiBrain(settings=settings, identity=id_mgr)
 
         with TestClient(app) as client:
             app.state.brain = mock_brain
@@ -419,10 +419,10 @@ class TestIdentityAPIRoutes:
             assert data["require_wake_word"] is False
 
     def test_change_name_and_confirm_endpoint(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         app = create_app(settings)
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        mock_brain = NexusBrain(settings=settings, identity=id_mgr)
+        mock_brain = SeyalAiBrain(settings=settings, identity=id_mgr)
 
         with TestClient(app) as client:
             app.state.brain = mock_brain
@@ -447,10 +447,10 @@ class TestIdentityAPIRoutes:
             assert get_resp.json()["wake_word"] == "Aria"
 
     def test_alias_api_endpoints(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         app = create_app(settings)
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        mock_brain = NexusBrain(settings=settings, identity=id_mgr)
+        mock_brain = SeyalAiBrain(settings=settings, identity=id_mgr)
 
         with TestClient(app) as client:
             app.state.brain = mock_brain
@@ -470,10 +470,10 @@ class TestIdentityAPIRoutes:
             assert "Ari" not in del_resp.json()["aliases"]
 
     def test_wake_word_detect_endpoint(self, tmp_path: Path):
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         app = create_app(settings)
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        mock_brain = NexusBrain(settings=settings, identity=id_mgr)
+        mock_brain = SeyalAiBrain(settings=settings, identity=id_mgr)
 
         with TestClient(app) as client:
             app.state.brain = mock_brain
@@ -495,10 +495,10 @@ class TestIdentityCLI:
     """Tests for CLI identity commands."""
 
     def test_print_identity_no_crash(self, tmp_path: Path):
-        from nexus.cli import _print_identity
+        from seyal_ai.cli import _print_identity
 
-        settings = NexusSettings()
+        settings = SeyalAiSettings()
         id_mgr = IdentityManager(storage_path=tmp_path / "identity.json")
-        brain = NexusBrain(settings=settings, identity=id_mgr)
+        brain = SeyalAiBrain(settings=settings, identity=id_mgr)
         # Should execute cleanly without raising exceptions
         _print_identity(brain)

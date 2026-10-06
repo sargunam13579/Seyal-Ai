@@ -1,5 +1,5 @@
 """
-NEXUS Phase 11 Comprehensive Security, Accessibility, Reliability & Integration Test Suite.
+Seyal AI Phase 11 Comprehensive Security, Accessibility, Reliability & Integration Test Suite.
 
 Verifies all 17 required areas:
 1. Voice
@@ -28,27 +28,27 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nexus.accessibility.audio_feedback import AudioFeedbackManager
-from nexus.accessibility.custom_commands import CustomCommandManager
-from nexus.accessibility.voice_navigation import VoiceNavigationEngine
-from nexus.api.app import create_app
-from nexus.core.brain import NexusBrain
-from nexus.planning.cancellation import CancellationType
-from nexus.planning.manager import TaskManager
-from nexus.planning.planner import TaskPlanner
-from nexus.reliability.connection_recovery import ConnectionRecoveryManager
-from nexus.reliability.offline import OfflineModeManager
-from nexus.security.auth import AuthManager
-from nexus.security.crypto import KeyManager, SecretVault
-from nexus.security.pairing import DevicePairingManager
-from nexus.security.permissions import (
+from seyal_ai.accessibility.audio_feedback import AudioFeedbackManager
+from seyal_ai.accessibility.custom_commands import CustomCommandManager
+from seyal_ai.accessibility.voice_navigation import VoiceNavigationEngine
+from seyal_ai.api.app import create_app
+from seyal_ai.core.brain import SeyalAiBrain
+from seyal_ai.planning.cancellation import CancellationType
+from seyal_ai.planning.manager import TaskManager
+from seyal_ai.planning.planner import TaskPlanner
+from seyal_ai.reliability.connection_recovery import ConnectionRecoveryManager
+from seyal_ai.reliability.offline import OfflineModeManager
+from seyal_ai.security.auth import AuthManager
+from seyal_ai.security.crypto import KeyManager, SecretVault
+from seyal_ai.security.pairing import DevicePairingManager
+from seyal_ai.security.permissions import (
     PermissionAction,
     PermissionEngine,
     PermissionScope,
     PermissionScopeManager,
 )
-from nexus.security.terminal_security import CommandSafetyStatus, TerminalSecurityClassifier
-from nexus.tools.base import RiskLevel
+from seyal_ai.security.terminal_security import CommandSafetyStatus, TerminalSecurityClassifier
+from seyal_ai.tools.base import RiskLevel
 
 
 # ===========================================================================
@@ -59,7 +59,7 @@ class TestArea1Voice:
 
     def test_voice_text_formatting_for_speech(self):
         engine = VoiceNavigationEngine()
-        raw_markdown = "# Status\n**Battery:** `95%`.\n[Details](http://nexus.local)"
+        raw_markdown = "# Status\n**Battery:** `95%`.\n[Details](http://seyal_ai.local)"
         speakable = engine.format_for_screen_reader(raw_markdown)
         assert "#" not in speakable
         assert "**" not in speakable
@@ -76,7 +76,7 @@ class TestArea2Text:
 
     @pytest.mark.asyncio
     async def test_text_processing_flow(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         await brain.initialize()
 
         with patch.object(brain._orchestrator, "process", new=AsyncMock(return_value="Hello, Shanmuga!")):
@@ -104,17 +104,17 @@ class TestArea4CustomName:
 
     @pytest.mark.asyncio
     async def test_request_and_confirm_name_change(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         await brain.initialize()
-        brain._identity.set_name("Nexus", sync_wake_word=True)
+        brain._identity.set_name("Seyal AI", sync_wake_word=True)
 
-        prompt = await brain.process("Call yourself JARVIS from now on")
-        assert "JARVIS" in prompt
+        prompt = await brain.process("Call yourself Aria from now on")
+        assert "Aria" in prompt
         assert brain.confirmation.has_pending is True
 
         confirm_resp = await brain.process("yes")
-        assert "JARVIS" in brain.name
-        assert "JARVIS" in confirm_resp
+        assert "Aria" in brain.name
+        assert "Aria" in confirm_resp
 
 
 # ===========================================================================
@@ -233,7 +233,7 @@ class TestArea11Memory:
 
     @pytest.mark.asyncio
     async def test_brain_learns_preferences(self):
-        brain = NexusBrain()
+        brain = SeyalAiBrain()
         await brain.initialize()
 
         with patch.object(brain._orchestrator, "process", new=AsyncMock(return_value="I have saved your preference.")):
@@ -358,8 +358,8 @@ class TestArea16EmergencyStop:
         mgr = TaskManager()
         cancellation = mgr.cancellation
 
-        assert cancellation.detect_cancellation_intent("NEXUS STOP") == CancellationType.EMERGENCY
-        assert cancellation.detect_cancellation_intent("nexus stop please") == CancellationType.GRACEFUL
+        assert cancellation.detect_cancellation_intent("Seyal AI STOP") == CancellationType.EMERGENCY
+        assert cancellation.detect_cancellation_intent("seyal_ai stop please") == CancellationType.GRACEFUL
 
         res = mgr.emergency_stop(reason="Operator safety override")
         assert res["emergency"] is True
@@ -380,7 +380,7 @@ class TestArea17AccessibilityAndOffline:
             actions=["open vscode", "set volume 10", "mute alerts"],
         )
 
-        actions = mgr.match_and_expand("Nexus please enter work mode")
+        actions = mgr.match_and_expand("Seyal AI please enter work mode")
         assert actions == ["open vscode", "set volume 10", "mute alerts"]
 
     @pytest.mark.asyncio

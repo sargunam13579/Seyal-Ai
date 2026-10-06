@@ -6,9 +6,9 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from nexus.api.app import create_app
-from nexus.core.config import NexusSettings
-from nexus.security.supabase_auth import SupabaseUser, decode_supabase_jwt, verify_supabase_token
+from seyal_ai.api.app import create_app
+from seyal_ai.core.config import SeyalAiSettings
+from seyal_ai.security.supabase_auth import SupabaseUser, decode_supabase_jwt, verify_supabase_token
 
 
 def test_supabase_jwt_decoding_unverified():
@@ -31,21 +31,21 @@ def test_supabase_jwt_decoding_verified():
     secret = "my-supabase-super-secret"
     payload = {
         "sub": "user-456-def",
-        "email": "hero@nexus.ai",
+        "email": "hero@seyal_ai.ai",
         "role": "authenticated",
         "aud": "authenticated",
         "exp": 2524608000,
     }
     token = jwt.encode(payload, secret, algorithm="HS256")
 
-    user = verify_supabase_token(token, settings=NexusSettings(supabase_jwt_secret=secret))
+    user = verify_supabase_token(token, settings=SeyalAiSettings(supabase_jwt_secret=secret))
     assert user is not None
     assert user.user_id == "user-456-def"
-    assert user.email == "hero@nexus.ai"
+    assert user.email == "hero@seyal_ai.ai"
 
 
 def test_auth_status_endpoint():
-    app = create_app(NexusSettings(supabase_url="https://yxvwhewzbifgttmiasas.supabase.co"))
+    app = create_app(SeyalAiSettings(supabase_url="https://yxvwhewzbifgttmiasas.supabase.co"))
     client = TestClient(app)
 
     response = client.get("/api/auth/status")
@@ -57,7 +57,7 @@ def test_auth_status_endpoint():
 
 
 def test_auth_me_endpoint_dev_fallback():
-    app = create_app(NexusSettings(supabase_url="https://yxvwhewzbifgttmiasas.supabase.co"))
+    app = create_app(SeyalAiSettings(supabase_url="https://yxvwhewzbifgttmiasas.supabase.co"))
     client = TestClient(app)
 
     response = client.get("/api/auth/me")
