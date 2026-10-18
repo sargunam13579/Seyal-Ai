@@ -29,6 +29,21 @@ except ImportError:
 HAS_PYWINAUTO = importlib.util.find_spec("pywinauto") is not None
 
 
+def _enable_windows_dpi_awareness() -> None:
+    """Ensure Windows process is DPI aware to eliminate coordinate drift on scaled displays."""
+    try:
+        import ctypes
+        import platform
+
+        if platform.system() == "Windows":
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # Per-Monitor V2
+            except Exception:
+                ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
+
 class ComputerActionExecutor:
     """Executes atomic computer actions on Windows OS with safety boundaries."""
 
@@ -36,12 +51,29 @@ class ComputerActionExecutor:
         self._smooth_mouse = smooth_mouse
         self._screen_width = 1920
         self._screen_height = 1080
+        _enable_windows_dpi_awareness()
         self._refresh_screen_geometry()
 
     def _refresh_screen_geometry(self) -> None:
-        """Update cached screen dimensions."""
+        """Update cached screen dimensions, supporting virtual desktop bounds on Windows."""
+        _enable_windows_dpi_awareness()
         if HAS_PYAUTOGUI:
             try:
+                import platform
+
+                if platform.system() == "Windows":
+                    try:
+                        import ctypes
+
+                        # SM_CXVIRTUALSCREEN = 78, SM_CYVIRTUALSCREEN = 79
+                        vw = ctypes.windll.user32.GetSystemMetrics(78)
+                        vh = ctypes.windll.user32.GetSystemMetrics(79)
+                        if vw > 0 and vh > 0:
+                            self._screen_width = vw
+                            self._screen_height = vh
+                            return
+                    except Exception:
+                        pass
                 w, h = pyautogui.size()
                 self._screen_width = w
                 self._screen_height = h
@@ -191,9 +223,19 @@ class ComputerActionExecutor:
 
     async def _type_text(self, action: ComputerAction) -> dict[str, Any]:
         text = action.text or ""
-        if HAS_PYAUTOGUI:
-            # Fast type execution
-            await asyncio.to_thread(pyautogui.write, text, interval=0.005)
+        # Unicode / Tamil / multilingual characters or multiline text cannot be typed by pyautogui.write
+        has_unicode = any(ord(c) > 127 for c in text) or "\n" in text or "\r" in text
+        if has_unicode:
+            log.info("Detected Unicode/multilingual text in _type_text. Routing via clipboard paste for perfect fidelity.")
+            return await self._clipboard_paste(action)
+
+        if HAS_PYAUTOGUI and text:
+            try:
+                # Fast type execution for standard ASCII
+                await asyncio.to_thread(pyautogui.write, text, interval=0.005)
+            except Exception as e:
+                log.warning("Direct typing failed (%s), falling back to clipboard paste.", e)
+                return await self._clipboard_paste(action)
         return {"action": "type_text", "length": len(text)}
 
     async def _key_press(self, action: ComputerAction) -> dict[str, Any]:
@@ -336,32 +378,39 @@ class ComputerActionExecutor:
             import webbrowser
             url = target if target.startswith("http") else f"https://{target}"
             webbrowser.open(url)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.3)
             return {"action": "open_app", "target": url, "success": True}
 
-        if "google" in target or "search" in target:
-            import re
+        # 2. Check App Map for Built-in Protocols & Fast Aliases first
+        cmd = app_map.get(target)
+
+        # 3. Explicit Web Search Intent
+        import re
+        search_match = re.match(
+            r"^(?:google\s*search(?:\s*for)?|search\s*(?:the\s*web\s*for|on\s*google\s*for|for)?|web\s*search(?:\s*for)?)\s*(.*)$",
+            target,
+            flags=re.IGNORECASE,
+        )
+        if search_match and not cmd:
             import urllib.parse
             import webbrowser
-            query = re.sub(r"^(google\s*search\s*(for)?|search\s*(for)?|google)\s*", "", target, flags=re.IGNORECASE).strip()
+            query = search_match.group(1).strip()
             if not query:
-                query = "weather"
-            url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
+                url = "https://www.google.com"
+            else:
+                url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
             webbrowser.open(url)
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.3)
             return {"action": "open_app", "target": url, "success": True}
-
-        # 2. Check App Map for Built-in Protocols & Fast Aliases
-        cmd = app_map.get(target)
 
         # 3. Dynamic Computer Awareness Search (Runtime Installed Apps on this Laptop)
         awareness_app = None
+        t_clean = target.lower().strip()
         if not cmd:
             try:
                 from seyal_ai.services.awareness import get_awareness_service
                 awareness = get_awareness_service().get_cached_awareness()
                 installed_apps = awareness.get("installed_apps", [])
-                t_clean = target.lower().strip()
 
                 # Exact match first
                 for app in installed_apps:
@@ -422,12 +471,13 @@ class ComputerActionExecutor:
                 subprocess.Popen(cmd, shell=True)
             
             # Wait for app window to appear and bring it to foreground without shrinking
-            brought = False
-            for _ in range(6):
-                await asyncio.sleep(0.5)
-                brought = await self._bring_window_to_foreground(target)
-                if brought:
-                    break
+            brought = await self._bring_window_to_foreground(target)
+            if not brought:
+                for _ in range(6):
+                    await asyncio.sleep(0.15)
+                    brought = await self._bring_window_to_foreground(target)
+                    if brought:
+                        break
 
             if HAS_PYAUTOGUI and (target in ("camera", "webcam") or not brought):
                 # Ensure the newly launched app takes foreground focus from Seyal AI

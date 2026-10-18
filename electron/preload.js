@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = () => callback();
     ipcRenderer.on('trigger-voice-listen', handler);
     return () => ipcRenderer.removeListener('trigger-voice-listen', handler);
-  }
+  },
+  setAlwaysOnTop: (flag) => ipcRenderer.invoke('set-always-on-top', flag),
+  openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
+  setAutoLaunch: (flag) => ipcRenderer.invoke('set-auto-launch', flag),
+  getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version')
 });

@@ -179,28 +179,83 @@ async def run_computer_use_goal(
     agent = get_agent()
     goal_lower = req.goal.strip().lower()
 
-    # 1. Check if user sent a cancellation or stop command
-    stop_keywords = [
-        "stop", "cancel", "halt", "quit", "exit", "stop it", "stop opening", "stop task",
-        "niruthu", "niruthappa", "cancel pannu", "stop pannu", "vendaam", "venaam",
-    ]
-    if any(goal_lower == kw or goal_lower.startswith("stop ") or goal_lower.startswith("cancel ") or goal_lower.startswith("niruthu ") for kw in stop_keywords):
+    from seyal_ai.planning.steering_router import SteeringIntentRouter, IntentClassification
+    from seyal_ai.core.telemetry_hub import TelemetryHub
+
+    is_running = agent.status in (AgentStatus.ACTING, AgentStatus.THINKING, AgentStatus.OBSERVING) or getattr(agent, "is_task_running", False)
+
+    # 1. If agent is currently running a task, handle via intelligent 3-Way Intent Router
+    if is_running:
+        router = SteeringIntentRouter()
+        active_goal = getattr(agent, "_active_goal", None)
+        intent_res = await router.classify(req.goal, active_task_goal=active_goal)
+
+        if intent_res.category == IntentClassification.CANCEL:
+            agent.request_stop()
+            agent._status = AgentStatus.IDLE
+            mt, kl = get_user_language_profile()
+            return {
+                "status": "stopped",
+                "narration": get_localized_response("stop_operation", mt, kl, current_input=req.goal),
+                "conversation_id": req.conversation_id,
+                "steps_executed": len(agent.history),
+            }
+
+        if intent_res.category == IntentClassification.STATUS_QUERY:
+            telemetry_narrative = TelemetryHub.get_instance().get_live_status_narrative()
+            if not telemetry_narrative:
+                telemetry_narrative = f"Task '{active_goal or 'Computer Task'}' is currently running."
+            return {
+                "status": "in_progress",
+                "narration": telemetry_narrative,
+                "conversation_id": req.conversation_id,
+                "steps_executed": len(agent.history),
+            }
+
+        if intent_res.category == IntentClassification.SIDE_QUERY:
+            # Answer side query concurrently without stopping the background task!
+            brain = getattr(request.app.state, "brain", None)
+            if brain:
+                side_resp = await brain.process(
+                    req.goal,
+                    allow_tools=False,
+                    conversation_id=req.conversation_id,
+                )
+            else:
+                side_resp = "Got it! Keeping the task running while we chat."
+            return {
+                "status": "in_progress",
+                "narration": side_resp,
+                "conversation_id": req.conversation_id,
+                "steps_executed": len(agent.history),
+            }
+
+        if intent_res.category in (IntentClassification.STEER, IntentClassification.PIVOT):
+            await agent.steer(req.goal)
+            return {
+                "status": "steered",
+                "narration": f"Steering received: {req.goal}",
+                "conversation_id": req.conversation_id,
+                "steps_executed": len(agent.history),
+            }
+
+        # New task requested: gracefully stop prior task to start new goal
+        log.info("Starting new task requested while agent was busy; transitioning to: %s", req.goal)
+        agent.request_stop()
+        await asyncio.sleep(0.3)
+        agent._status = AgentStatus.IDLE
+
+    # 2. If idle and received a standalone stop/halt command
+    elif any(goal_lower == kw or goal_lower.startswith(kw + " ") for kw in ("stop", "cancel", "niruthu", "pause", "halt", "quit", "exit")):
         agent.request_stop()
         agent._status = AgentStatus.IDLE
         mt, kl = get_user_language_profile()
         return {
             "status": "stopped",
-            "narration": get_localized_response("stop_operation", mt, kl),
+            "narration": get_localized_response("stop_operation", mt, kl, current_input=req.goal),
             "conversation_id": req.conversation_id,
             "steps_executed": len(agent.history),
         }
-
-    # 2. If agent is currently busy, gracefully stop the previous task and start the new one
-    if agent.status in (AgentStatus.ACTING, AgentStatus.THINKING, AgentStatus.OBSERVING):
-        log.info("Agent is busy; auto-stopping prior task to fulfill new goal: %s", req.goal)
-        agent.request_stop()
-        await asyncio.sleep(0.3)
-        agent._status = AgentStatus.IDLE
 
     # 3. Launch task
     result = await agent.run_goal(goal=req.goal, auto_confirm=req.auto_confirm)

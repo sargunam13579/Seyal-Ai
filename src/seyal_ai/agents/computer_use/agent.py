@@ -207,34 +207,9 @@ UNIVERSAL_CONVO_FALLBACK = "I'm listening! How can I help you today? 😊✨"
 async def generate_task_acknowledgment(goal: str, router: ModelRouter | None = None) -> str:
     """
     Generate an instantaneous, natural spoken task acknowledgment in the user's EXACT language.
-    True Universal Architecture: Powered by Gemini Flash across 100+ languages (English, Tamil,
-    Tanglish, Hindi, Telugu, Malayalam, Spanish, French, German, Japanese, Arabic, etc.).
-    Zero hardcoded if/else language checks.
+    Zero-delay local fast-path using universal language profile (0ms instead of 1.5s cloud LLM roundtrip).
     """
     clean_name = goal[:35].strip()
-    try:
-        r = router or ModelRouter()
-        await r.initialize()
-        prompt = (
-            f"The user gave a computer command: \"{goal}\".\n"
-            "Generate a natural, enthusiastic spoken acknowledgment (3 to 6 words) stating that you are starting this task right now.\n"
-            "MANDATORY: You MUST reply in the EXACT SAME LANGUAGE and dialect that the user used.\n"
-            "Output strictly ONLY the spoken sentence (no quotes, no preamble)."
-        )
-        res = await asyncio.wait_for(
-            r.generate(
-                messages=[LLMMessage(role="user", content=prompt)],
-                tier=ModelTier.FAST,
-                temperature=0.3,
-            ),
-            timeout=1.5,
-        )
-        ack = (res.content or "").strip().replace('"', '')
-        if ack and len(ack) < 100:
-            return ack
-    except Exception as e:
-        log.warning("Dynamic task acknowledgment notice: %s", e)
-
     mt, kl = get_user_language_profile()
     return get_localized_response("task_ack", mt, kl, item=clean_name)
 
@@ -654,6 +629,23 @@ class ConversationalComputerUseAgent:
         try:
             await self._router.initialize()
             context_items = []
+
+            # Seyal AI Situational Awareness & Desktop State
+            try:
+                from seyal_ai.services.seyal_ai_service import seyal_ai_service
+                snap = seyal_ai_service.get_live_telemetry_snapshot()
+                if snap.get("active_window") and snap["active_window"] != "Desktop / Windows Shell":
+                    context_items.append(f"Active App Currently on Screen: '{snap['active_window']}'")
+                rems = snap.get("reminders") or []
+                if rems:
+                    rem_titles = [r.get("title", "") for r in rems[:2] if r.get("title")]
+                    context_items.append(f"Pending Reminders for Today: {', '.join(rem_titles)}")
+                bat = snap.get("battery") or {}
+                if bat.get("available") and not bat.get("power_plugged") and bat.get("percent", 100) <= 25:
+                    context_items.append(f"Battery Alert: Low battery ({bat.get('percent')}%)")
+            except Exception as j_err:
+                log.debug("Seyal AI telemetry for greeting notice: %s", j_err)
+
             if milestones:
                 context_items.append(f"Upcoming Milestones/Events: {', '.join(milestones[:2])}")
             if projects:
@@ -702,7 +694,7 @@ class ConversationalComputerUseAgent:
 
     async def _classify_intent(self, goal: str) -> str:
         """
-        Universal Multi-Lingual Intent Classifier (0ms safety stop + zero-shot fast LLM).
+        Universal Multi-Lingual Intent Classifier (0ms safety stop + structural & semantic single-pass routing).
         Unified into 3 core architectural decisions:
         - CONTROL: urgent stop, cancel, halt, or pause commands.
         - TASK: computer-use, OS operations, app launch/interaction, mouse/keyboard actions, file tasks.
@@ -716,10 +708,41 @@ class ConversationalComputerUseAgent:
             "stop", "cancel", "pause", "halt", "stop it", "niruthu", "quit", "abort",
             "freeze", "kill", "exit", "rok do", "band karo", "para", "detente", "arret"
         }
-        if lower_clean in emergency_stops or any(lower_goal.startswith(s) for s in ("stop ", "cancel ")):
+        if lower_clean in emergency_stops or any(lower_goal.startswith(s) for s in ("stop ", "cancel ", "niruthu ")):
             return "CONTROL"
 
-        # 2. Universal Fast LLM Intent Classifier
+        # 2. Fast 0ms Structural & OS Action Routing (Single-Pass Acceleration)
+        # Check if direct application launch:
+        if self._detect_simple_app_launch(goal):
+            return "TASK"
+
+        # Check if hardware / universal keyboard shortcut:
+        try:
+            if await resolve_universal_shortcut(goal, router=self._router):
+                return "TASK"
+        except Exception:
+            pass
+
+        # Direct OS automation & desktop execution commands:
+        task_action_words = {
+            "click", "double click", "right click", "screenshot", "screen shot",
+            "press key", "type into", "scroll down", "scroll up", "drag and drop",
+            "minimize window", "maximize window", "reboot", "restart laptop", "shutdown",
+            "open app", "close app", "kill process", "take photo", "record screen"
+        }
+        if any(act in lower_goal for act in task_action_words):
+            return "TASK"
+
+        # Inquisitive questions, discussions, creative writing, coding, chit-chat:
+        # Route directly to conversational streaming pass in 0.0ms!
+        if lower_goal.endswith("?") or any(lower_goal.startswith(q) for q in (
+            "who ", "what ", "when ", "where ", "why ", "how ", "can you explain", "explain ", "tell me",
+            "is it ", "does it ", "do you ", "are you ", "enna ", "epdi ", "edhukku ", "yaar ", "sollu ",
+            "kadhai ", "write a ", "generate a ", "translate ", "code ", "solve ", "give me "
+        )):
+            return "CHAT"
+
+        # 3. Universal Fast LLM Intent Classifier for edge-case ambiguity
         try:
             await self._router.initialize()
             intent_prompt = (
@@ -737,7 +760,7 @@ class ConversationalComputerUseAgent:
                     tier=ModelTier.FAST,
                     temperature=0.0,
                 ),
-                timeout=1.5,
+                timeout=0.8,
             )
             raw_intent = (res.content or "").strip().upper()
             if "CONTROL" in raw_intent or "STOP" in raw_intent:
@@ -747,13 +770,7 @@ class ConversationalComputerUseAgent:
             if "CHAT" in raw_intent or "CONVERSATION" in raw_intent:
                 return "CHAT"
         except Exception as llm_err:
-            log.warning("Universal LLM intent classification notice: %s", llm_err)
-
-        # 3. Fast Fallback Heuristic
-        task_action_words = {"open", "launch", "close", "kill", "click", "type", "screenshot", "camera", "calc", "calculator", "notepad", "chrome", "vscode", "explorer", "folder"}
-        words = set(re.findall(r"\w+", lower_clean))
-        if words.intersection(task_action_words):
-            return "TASK"
+            log.debug("Universal LLM intent classification notice: %s", llm_err)
 
         return "CHAT"
 
@@ -804,12 +821,71 @@ class ConversationalComputerUseAgent:
                 return canonical_name
         return None
 
+    def _detect_simple_app_close(self, goal: str) -> str | None:
+        """
+        Fast-Path: Detect if user goal is to close/kill an application.
+        Direct sub-10ms native process termination.
+        """
+        lower = goal.lower().strip()
+        close_triggers = ("close", "kill", "terminate", "exit", "moodu", "band karo", "close pannu")
+        if not any(t in lower for t in close_triggers):
+            return None
+
+        known_apps = {
+            "notepad": "notepad.exe",
+            "calc": "calc.exe",
+            "calculator": "calc.exe",
+            "chrome": "chrome.exe",
+            "google chrome": "chrome.exe",
+            "edge": "msedge.exe",
+            "microsoft edge": "msedge.exe",
+            "vscode": "code.exe",
+            "code": "code.exe",
+            "paint": "mspaint.exe",
+        }
+        for app_alias, proc_name in sorted(known_apps.items(), key=lambda x: len(x[0]), reverse=True):
+            if app_alias in lower:
+                return proc_name
+        return None
+
+    def _check_action_permission(self, action: ComputerAction) -> tuple[bool, str]:
+        """
+        Pre-flight permission check against user settings in PermissionsTab & SafetyTab.
+        Returns (is_allowed, reason).
+        """
+        try:
+            from seyal_ai.security.permissions import get_permission_engine, PermissionScope
+            engine = get_permission_engine()
+            scope: PermissionScope | None = None
+
+            if action.action_type in (ActionType.KEY_PRESS, ActionType.HOTKEY, ActionType.TYPE_TEXT, ActionType.CLIPBOARD_PASTE):
+                scope = PermissionScope.KEYBOARD_CONTROL
+            elif action.action_type in (ActionType.CLICK, ActionType.DOUBLE_CLICK, ActionType.RIGHT_CLICK, ActionType.MIDDLE_CLICK, ActionType.MOUSE_MOVE, ActionType.MOUSE_DRAG, ActionType.MOUSE_SCROLL):
+                scope = PermissionScope.MOUSE_CONTROL
+            elif action.action_type in (ActionType.OPEN_APP, ActionType.WINDOW_CLOSE, ActionType.SWITCH_WINDOW, ActionType.WINDOW_MINIMIZE, ActionType.WINDOW_MAXIMIZE, ActionType.FOCUS_WINDOW):
+                scope = PermissionScope.APP_CONTROL
+
+            if scope:
+                status = engine.get_scope_status(scope)
+                if status:
+                    if status.mode == "block" or not status.granted:
+                        return False, f"Action blocked: '{scope.value}' capability is blocked in Permissions Tab."
+                    engine.record_access(scope, accessor="Seyal AI Agent")
+        except Exception as e:
+            log.debug("Permission check notice: %s", e)
+
+        return True, "Allowed"
+
     async def _build_conversational_telemetry_prompt(self) -> str:
         """
         Build verified local desktop telemetry (sidebar chats + installed apps) for conversational queries.
-        Universal Multilingual Design: No regex or keyword parsing. Gives the LLM verified ground truth so
-        it can accurately answer questions in ANY language (English, Tamil, Tanglish, Hindi, Spanish, etc.).
+        Universal Multilingual Design: Cached for 60s in RAM to eliminate database/disk roundtrips.
         """
+        now = time.time()
+        cached = getattr(self, "_telemetry_cache", None)
+        if cached and (now - cached[0] < 60.0):
+            return cached[1]
+
         blocks = []
         try:
             from seyal_ai.database.engine import get_session
@@ -885,8 +961,17 @@ class ConversationalComputerUseAgent:
         except Exception as uk_err:
             log.debug("User knowledge retrieval notice: %s", uk_err)
 
+        try:
+            from seyal_ai.services.seyal_ai_service import seyal_ai_service
+            situational_prompt = await seyal_ai_service.build_situational_prompt()
+            if situational_prompt:
+                blocks.append(situational_prompt.strip())
+        except Exception as seyal_err:
+            log.debug("Seyal AI telemetry notice: %s", seyal_err)
+
+        res = ""
         if blocks:
-            return (
+            res = (
                 "\n\nVERIFIED SYSTEM & SIDEBAR TELEMETRY FACTS:\n"
                 + "\n\n".join(blocks)
                 + "\n\nCRITICAL INSTRUCTIONS FOR SYSTEM TELEMETRY:\n"
@@ -895,10 +980,16 @@ class ConversationalComputerUseAgent:
                 "  * Never fabricate numbers or invent imaginary software.\n"
                 "  * Answer naturally and fluently in the user's language."
             )
-        return ""
+        self._telemetry_cache = (now, res)
+        return res
 
-    async def _build_user_language_prompt(self) -> str:
-        """Fetch user profile language preferences and build strict language guardrail."""
+    async def _build_user_language_prompt(self, current_input: str | None = None) -> str:
+        """Fetch user profile language preferences and build strict language guardrail (cached in RAM)."""
+        now = time.time()
+        cached = getattr(self, "_lang_cache", None)
+        if cached and (now - cached[0] < 60.0) and not current_input:
+            return cached[1]
+
         try:
             from sqlalchemy import select
             from seyal_ai.database.engine import get_session
@@ -910,22 +1001,26 @@ class ConversationalComputerUseAgent:
                 res = await session.execute(stmt)
                 user = res.scalar_one_or_none()
                 if user and (user.mother_tongue or user.known_languages):
-                    return build_language_guardrail_prompt(
+                    prompt = build_language_guardrail_prompt(
                         mother_tongue=user.mother_tongue,
                         known_languages=user.known_languages,
+                        current_input=current_input,
                     )
+                    if not current_input:
+                        self._lang_cache = (now, prompt)
+                    return prompt
         except Exception as err:
             log.debug("User language prompt lookup notice: %s", err)
 
         from seyal_ai.llm.prompts.language_guardrail import build_language_guardrail_prompt
-        return build_language_guardrail_prompt()
+        return build_language_guardrail_prompt(current_input=current_input)
 
     async def _handle_conversational_query(self, goal: str) -> dict[str, Any]:
         """Process conversational chit-chat, Q&A, and discussion using the Full Chatbot Engine."""
         self._status = AgentStatus.THINKING
         await self._router.initialize()
 
-        lang_prompt = await self._build_user_language_prompt()
+        lang_prompt = await self._build_user_language_prompt(current_input=goal)
         system_content = CHATBOT_SYSTEM_PROMPT + lang_prompt + await self._build_conversational_telemetry_prompt()
 
         messages = [LLMMessage(role="system", content=system_content)]
@@ -1199,6 +1294,17 @@ class ConversationalComputerUseAgent:
         # Background 3-Tier memory learning (LOW discarded, MEDIUM/HIGH stored)
         asyncio.create_task(self._classify_and_store_memory(goal))
 
+        # 0. Custom Voice Macros & Compound Automations
+        try:
+            from seyal_ai.accessibility.custom_commands import CustomCommandManager
+            cmd_mgr = CustomCommandManager()
+            expanded_actions = cmd_mgr.match_and_expand(goal)
+            if expanded_actions and len(expanded_actions) > 1:
+                log.info("Expanded custom macro '%s' into %d actions: %s", goal, len(expanded_actions), expanded_actions)
+                return await self._run_compound_goals(expanded_actions, original_instruction=goal)
+        except Exception as macro_err:
+            log.debug("Macro expansion notice: %s", macro_err)
+
         # Case 1: Dynamic Multi-Intent Decomposition (Zero Hardcoding)
         sub_goals = await decompose_user_intents(goal, self._router)
         if len(sub_goals) > 1:
@@ -1260,6 +1366,420 @@ class ConversationalComputerUseAgent:
         """Execute a single atomic or sequential computer-use goal."""
         self._current_task = goal
 
+        # 0. Emergency Stop Guard (0ms)
+        lower_goal = goal.lower().strip()
+        lower_clean = re.sub(r"[^\w\s]", "", lower_goal).strip()
+        emergency_stops = {
+            "stop", "cancel", "pause", "halt", "stop it", "niruthu", "quit", "abort",
+            "freeze", "kill", "exit", "rok do", "band karo", "para", "detente", "arret"
+        }
+        if lower_clean in emergency_stops or any(lower_goal.startswith(s) for s in ("stop ", "cancel ")):
+            self._status = AgentStatus.STOPPED
+            self._is_task_running = False
+            return {"status": "stopped", "intent": "CONTROL", "is_task": False, "reason": "User requested stop", "steps_executed": 0}
+
+        # 0.5 Seyal AI Unified Architecture: Instant 0ms - Sub-20ms Fast-Path Dispatcher
+        from seyal_ai.services.seyal_ai_service import seyal_ai_service
+        seyal_fast = seyal_ai_service.detect_instant_fast_path(goal)
+        if seyal_fast:
+            f_type = seyal_fast.get("type")
+            if f_type == "ACTION":
+                action_key = seyal_fast["action_key"]
+                act_type = ActionType.HOTKEY if "+" in action_key else ActionType.KEY_PRESS
+                action = ComputerAction(
+                    action_type=act_type,
+                    key=action_key,
+                    reasoning=f"Seyal AI Fast-Path: {seyal_fast.get('description', action_key)}",
+                )
+                allowed, perm_msg = self._check_action_permission(action)
+                if not allowed:
+                    self._is_task_running = False
+                    self._status = AgentStatus.STOPPED
+                    await self._event_bus.emit(
+                        "computer_use.narrate",
+                        {"narration": perm_msg, "step": 1, "permission_blocked": True}
+                    )
+                    return {
+                        "status": "permission_blocked",
+                        "intent": "TASK",
+                        "is_task": True,
+                        "goal": goal,
+                        "narration": perm_msg,
+                        "steps_executed": 0,
+                        "history": self._history,
+                    }
+
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                start_t = time.perf_counter()
+                action_res = await self._executor.execute(action)
+                elapsed = time.perf_counter() - start_t
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="System"),
+                        thought=f"Seyal AI Fast-Path: {action.reasoning}",
+                        action=action,
+                        action_result=action_res,
+                        success=action_res.get("success", True),
+                        elapsed_seconds=elapsed,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name=action_key,
+                    goal=goal,
+                    router=self._router,
+                    details=seyal_fast.get("description", action_key),
+                )
+
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_MEDIA":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                act_key = seyal_fast.get("action_key", "play_pause")
+                success, details = seyal_ai_service.media_control(act_key)
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="System"),
+                        thought=f"Seyal AI Fast-Path: Media {act_key}",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key=f"media_{act_key}"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name=f"media_{act_key}",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_OPEN_DOWNLOAD":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                success, details = seyal_ai_service.open_latest_download()
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="System"),
+                        thought="Seyal AI Fast-Path: Open latest downloaded file",
+                        action=ComputerAction(action_type=ActionType.OPEN_APP, app_name="latest_download"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name="open_latest_download",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_SET_BRIGHTNESS":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                lvl = int(seyal_fast.get("level", 50))
+                success, details = seyal_ai_service.set_screen_brightness(lvl)
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="System"),
+                        thought=f"Seyal AI Fast-Path: Set brightness to {lvl}%",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key=f"brightness_{lvl}"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.02,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name=f"brightness_{lvl}",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_CHANGE_VOICE":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                v_target = seyal_fast.get("voice")
+                s_target = seyal_fast.get("speed")
+                s_delta = seyal_fast.get("speed_delta")
+                if s_delta is not None:
+                    curr_speed = float(seyal_ai_service.get_voice_settings().get("speed", 1.0))
+                    s_target = curr_speed + s_delta
+                l_target = seyal_fast.get("language")
+                e_target = seyal_fast.get("enabled")
+
+                success, details = seyal_ai_service.update_voice_settings(
+                    voice=v_target,
+                    speed=s_target,
+                    language=l_target,
+                    enabled=e_target,
+                )
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="System Settings"),
+                        thought=f"Seyal AI Settings: {details}",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key="voice_config_update"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name="change_voice",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "settings.voice_updated",
+                    {"goal": goal, "voice": v_target, "speed": s_target, "details": details},
+                )
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_SET_PERMISSION":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                scope = seyal_fast.get("scope", "all")
+                mode = seyal_fast.get("mode", "allow")
+                if scope == "all":
+                    success, details = seyal_ai_service.grant_all_permissions()
+                else:
+                    success, details = seyal_ai_service.modify_permission(scope, mode=mode)
+
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="Security Gateway"),
+                        thought=f"Seyal AI Permissions: {details}",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key=f"permission_{scope}_{mode}"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name=f"permission_{scope}",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "settings.permissions_updated",
+                    {"goal": goal, "scope": scope, "mode": mode, "details": details},
+                )
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_RESET_PERMISSIONS":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                success, details = seyal_ai_service.reset_permissions()
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="Security Gateway"),
+                        thought=f"Seyal AI Permissions: {details}",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key="permissions_reset"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name="reset_permissions",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "settings.permissions_updated",
+                    {"goal": goal, "action": "reset", "details": details},
+                )
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type == "ACTION_MANAGE_TASK":
+                self._is_task_running = True
+                self._status = AgentStatus.ACTING
+                t_action = seyal_fast.get("action", "cancel")
+                t_id = seyal_fast.get("task_id")
+                if t_action == "emergency_stop":
+                    success, details = seyal_ai_service.emergency_stop_all()
+                    self._status = AgentStatus.STOPPED
+                    self._is_task_running = False
+                elif t_action == "cancel":
+                    success, details = seyal_ai_service.cancel_agent_task(task_id=t_id)
+                elif t_action == "clear":
+                    success, details = seyal_ai_service.clear_completed_tasks()
+                else:
+                    success, details = False, f"Unknown task action: {t_action}"
+
+                self._history.append(
+                    StepRecord(
+                        step_number=1,
+                        observation=ScreenObservation(active_window="Agent Task Manager"),
+                        thought=f"Seyal AI Task Manager: {details}",
+                        action=ComputerAction(action_type=ActionType.HOTKEY, key=f"task_manager_{t_action}"),
+                        action_result={"success": success},
+                        success=success,
+                        elapsed_seconds=0.01,
+                    )
+                )
+                narr = await seyal_ai_service.synthesize_action_narration(
+                    action_name=f"task_{t_action}",
+                    goal=goal,
+                    router=self._router,
+                    details=details,
+                )
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "settings.tasks_updated",
+                    {"goal": goal, "action": t_action, "details": details},
+                )
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 1},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "TASK",
+                    "is_task": True,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 1,
+                    "history": self._history,
+                }
+
+            elif f_type and str(f_type).startswith("QUERY_"):
+                narr = await seyal_ai_service.synthesize_fast_spoken_reply(str(f_type), goal, self._router)
+                self._convo_history.append({"role": "user", "content": goal})
+                self._convo_history.append({"role": "assistant", "content": narr})
+                if len(self._convo_history) > 20:
+                    self._convo_history = self._convo_history[-20:]
+
+                self._status = AgentStatus.IDLE
+                self._is_task_running = False
+                await self._event_bus.emit(
+                    "computer_use.finished",
+                    {"goal": goal, "narration": narr, "step": 0},
+                )
+                return {
+                    "status": "completed",
+                    "intent": "CONVERSATION",
+                    "is_task": False,
+                    "goal": goal,
+                    "narration": narr,
+                    "steps_executed": 0,
+                    "history": [],
+                }
+
         # 1. First classify intent: Conversation vs Task vs System
         intent = await self._classify_intent(goal)
         log.info("Classified goal intent: '%s' for input: '%s'", intent, goal)
@@ -1277,6 +1797,145 @@ class ConversationalComputerUseAgent:
 
         if intent == "SYSTEM_BATTERY":
             return await self._handle_battery_query(goal)
+
+        # 1.5 Universal Fast-Path: Shortcut-First Acceleration (0ms - Sub-100ms)
+        fast_shortcut = await resolve_universal_shortcut(goal, router=self._router)
+        if fast_shortcut:
+            log.info("Fast-Path: Shortcut-First Acceleration matched: %s (%s)", fast_shortcut.action_type, fast_shortcut.key)
+            self._is_task_running = True
+            self._status = AgentStatus.ACTING
+            start_t = time.perf_counter()
+            action_res = await self._executor.execute(fast_shortcut)
+            elapsed = time.perf_counter() - start_t
+            self._history.append(
+                StepRecord(
+                    step_number=1,
+                    observation=ScreenObservation(active_window="System"),
+                    thought=f"Shortcut-First Acceleration: {fast_shortcut.reasoning or fast_shortcut.key}",
+                    action=fast_shortcut,
+                    action_result=action_res,
+                    success=action_res.get("success", True),
+                    elapsed_seconds=elapsed,
+                )
+            )
+            self._status = AgentStatus.IDLE
+            self._is_task_running = False
+
+            # Instant 0ms spoken confirmation in user's language without secondary LLM delay
+            mt, kl = get_user_language_profile()
+            fast_narr = get_localized_response(
+                "task_done", mt, kl, item=fast_shortcut.key or fast_shortcut.action_type
+            )
+
+            await self._event_bus.emit(
+                "computer_use.finished",
+                {"goal": goal, "narration": fast_narr, "step": 1},
+            )
+            return {
+                "status": "completed",
+                "intent": "TASK",
+                "is_task": True,
+                "goal": goal,
+                "narration": fast_narr,
+                "history": self._history,
+                "total_steps": 1,
+                "steps_executed": 1,
+            }
+
+        # 1.6 Fast-Path: Direct OS App Launcher (< 200ms without Vision LLM round-trip)
+        fast_app = self._detect_simple_app_launch(goal)
+        if fast_app:
+            log.info("Fast-Path: Direct OS launch for app '%s'", fast_app)
+            self._is_task_running = True
+            self._status = AgentStatus.ACTING
+            start_t = time.perf_counter()
+            action_res = await self._executor.execute(
+                ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app)
+            )
+            elapsed = time.perf_counter() - start_t
+            self._history.append(
+                StepRecord(
+                    step_number=1,
+                    observation=ScreenObservation(active_window=fast_app),
+                    thought=f"Fast-path direct application launch: {fast_app}",
+                    action=ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app),
+                    action_result=action_res,
+                    success=action_res.get("success", True),
+                    elapsed_seconds=elapsed,
+                )
+            )
+            self._status = AgentStatus.IDLE
+            self._is_task_running = False
+
+            # Instant 0ms spoken confirmation in user's language without secondary LLM delay
+            mt, kl = get_user_language_profile()
+            fast_narr = get_localized_response("app_opened", mt, kl, app=fast_app.title())
+
+            await self._event_bus.emit(
+                "computer_use.finished",
+                {"goal": goal, "narration": fast_narr, "step": 1},
+            )
+            return {
+                "status": "completed",
+                "intent": "TASK",
+                "is_task": True,
+                "goal": goal,
+                "narration": fast_narr,
+                "steps_executed": 1,
+                "history": [
+                    {
+                        "step": 1,
+                        "thought": f"Fast-path launched {fast_app}",
+                        "action": "open_app",
+                        "coordinates": (None, None),
+                        "success": True,
+                        "elapsed_seconds": elapsed,
+                    }
+                ],
+            }
+
+        # 1.7 Fast-Path: Direct Native App Close (< 50ms without Vision LLM)
+        fast_close_proc = self._detect_simple_app_close(goal)
+        if fast_close_proc:
+            log.info("Fast-Path: Direct OS termination for process '%s'", fast_close_proc)
+            self._is_task_running = True
+            self._status = AgentStatus.ACTING
+            import subprocess
+            subprocess.run(["taskkill", "/F", "/IM", fast_close_proc], capture_output=True)
+            self._history.append(
+                StepRecord(
+                    step_number=1,
+                    observation=ScreenObservation(active_window="System"),
+                    thought=f"Native App Control: Terminated {fast_close_proc}",
+                    action=ComputerAction(action_type=ActionType.WINDOW_CLOSE, app_name=fast_close_proc),
+                    action_result={"success": True},
+                    success=True,
+                    elapsed_seconds=0.01,
+                )
+            )
+            from seyal_ai.services.seyal_ai_service import seyal_ai_service
+            narr = await seyal_ai_service.synthesize_action_narration(
+                action_name=f"close_{fast_close_proc}",
+                goal=goal,
+                router=self._router,
+                details=f"Closed {fast_close_proc.replace('.exe', '')}",
+            )
+            self._status = AgentStatus.IDLE
+            self._is_task_running = False
+            await self._event_bus.emit(
+                "computer_use.finished",
+                {"goal": goal, "narration": narr, "step": 1},
+            )
+            return {
+                "status": "completed",
+                "intent": "TASK",
+                "is_task": True,
+                "goal": goal,
+                "narration": narr,
+                "history": self._history,
+                "total_steps": 1,
+                "steps_executed": 1,
+            }
 
         # 2. Autonomous Task Classifier (Types 1-4 & NOTIFY vs TASK)
         try:
@@ -1329,139 +1988,12 @@ class ConversationalComputerUseAgent:
         except Exception as class_err:
             log.debug("Semantic task classification notice: %s", class_err)
 
-        # Universal Fast-Path: Shortcut-First Acceleration across ANY language/phrasing
-        fast_shortcut = await resolve_universal_shortcut(goal, router=self._router)
-        if fast_shortcut:
-            log.info("Fast-Path: Shortcut-First Acceleration matched: %s (%s)", fast_shortcut.action_type, fast_shortcut.key)
-            self._is_task_running = True
-            self._status = AgentStatus.ACTING
-            start_t = time.perf_counter()
-            action_res = await self._executor.execute(fast_shortcut)
-            elapsed = time.perf_counter() - start_t
-            self._history.append(
-                StepRecord(
-                    step_number=1,
-                    observation=ScreenObservation(active_window="System"),
-                    thought=f"Shortcut-First Acceleration: {fast_shortcut.reasoning or fast_shortcut.key}",
-                    action=fast_shortcut,
-                    action_result=action_res,
-                    success=action_res.get("success", True),
-                    elapsed_seconds=elapsed,
-                )
-            )
-            self._status = AgentStatus.IDLE
-            self._is_task_running = False
-
-            # Synthesize natural spoken confirmation in user's language
-            try:
-                synth_res = await self._router.generate(
-                    messages=[
-                        LLMMessage(
-                            role="user",
-                            content=(
-                                f"User instruction: \"{goal}\"\n"
-                                f"Action performed: Successfully executed shortcut {fast_shortcut.key or fast_shortcut.action_type}.\n"
-                                "Synthesize a 1-sentence enthusiastic, natural spoken confirmation in the user's exact language and dialect (e.g. English, Tamil, Tanglish, etc.), warmly asking what to do next.\n"
-                                "Output strictly ONLY the spoken sentence."
-                            ),
-                        )
-                    ],
-                    tier=ModelTier.FAST,
-                    temperature=0.3,
-                )
-                fast_narr = (synth_res.content or "").strip().replace('"', '')
-            except Exception:
-                mt, kl = get_user_language_profile()
-                fast_narr = get_localized_response(
-                    "task_done", mt, kl, item=fast_shortcut.key or fast_shortcut.action_type
-                )
-
-            await self._event_bus.emit(
-                "computer_use.finished",
-                {"goal": goal, "narration": fast_narr, "step": 1},
-            )
-            return {
-                "status": "completed",
-                "intent": "TASK",
-                "is_task": True,
-                "goal": goal,
-                "narration": fast_narr,
-                "history": self._history,
-                "total_steps": 1,
-                "steps_executed": 1,
-            }
-
-        # Fast-Path: Direct OS App Launcher (< 200ms without Vision LLM round-trip)
-        fast_app = self._detect_simple_app_launch(goal)
-        if fast_app:
-            log.info("Fast-Path: Direct OS launch for app '%s'", fast_app)
-            self._is_task_running = True
-            self._status = AgentStatus.ACTING
-            start_t = time.perf_counter()
-            action_res = await self._executor.execute(
-                ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app)
-            )
-            elapsed = time.perf_counter() - start_t
-            self._history.append(
-                StepRecord(
-                    step_number=1,
-                    observation=ScreenObservation(active_window=fast_app),
-                    thought=f"Fast-path direct application launch: {fast_app}",
-                    action=ComputerAction(action_type=ActionType.OPEN_APP, app_name=fast_app),
-                    action_result=action_res,
-                    success=action_res.get("success", True),
-                    elapsed_seconds=elapsed,
-                )
-            )
-            self._status = AgentStatus.IDLE
-            self._is_task_running = False
-
-            # Synthesize natural spoken confirmation in user's language
-            try:
-                synth_res = await self._router.generate(
-                    messages=[
-                        LLMMessage(
-                            role="user",
-                            content=(
-                                f"User instruction: \"{goal}\"\n"
-                                f"Action performed: Successfully launched {fast_app.title()}.\n"
-                                "Synthesize a 1-sentence enthusiastic, natural spoken confirmation in the user's exact language and dialect (e.g. English, Tamil, Tanglish, etc.), warmly asking what to do next.\n"
-                                "Output strictly ONLY the spoken sentence."
-                            ),
-                        )
-                    ],
-                    tier=ModelTier.FAST,
-                    temperature=0.3,
-                )
-                fast_narr = (synth_res.content or "").strip().replace('"', '')
-            except Exception:
-                mt, kl = get_user_language_profile()
-                fast_narr = get_localized_response("app_opened", mt, kl, app=fast_app.title())
-
-            await self._event_bus.emit(
-                "computer_use.finished",
-                {"goal": goal, "narration": fast_narr, "step": 1},
-            )
-            return {
-                "status": "completed",
-                "intent": "TASK",
-                "is_task": True,
-                "goal": goal,
-                "narration": fast_narr,
-                "steps_executed": 1,
-                "history": [
-                    {
-                        "step": 1,
-                        "thought": f"Fast-path launched {fast_app}",
-                        "action": "open_app",
-                        "coordinates": (None, None),
-                        "success": True,
-                        "elapsed_seconds": elapsed,
-                    }
-                ],
-            }
-
         # 2. TASK INTENT: Computer-Use Execution Engine
+        import uuid
+        from seyal_ai.core.telemetry_hub import TelemetryHub
+        self._current_task_id = f"task_{uuid.uuid4().hex[:6]}"
+        self._active_goal = goal
+        TelemetryHub.get_instance().register_task(self._current_task_id, goal=goal, max_steps=self._max_steps)
         self._is_task_running = True
         self._status = AgentStatus.OBSERVING
         await self._event_bus.emit(
@@ -1521,6 +2053,17 @@ class ConversationalComputerUseAgent:
                 narration = decision.get("narration", "")
                 action_data = decision.get("action", {})
                 action_type_str = action_data.get("action_type", "wait")
+
+                try:
+                    from seyal_ai.core.telemetry_hub import TelemetryHub
+                    TelemetryHub.get_instance().update_task_progress(
+                        getattr(self, "_current_task_id", "default"),
+                        step=step_num,
+                        thought=thought,
+                        action_summary=action_type_str,
+                    )
+                except Exception:
+                    pass
 
                 try:
                     action_type = ActionType(action_type_str)
@@ -1703,6 +2246,18 @@ class ConversationalComputerUseAgent:
             return {"status": "failed", "error": str(e), "steps_executed": len(self._history)}
         finally:
             self._is_task_running = False
+            try:
+                from seyal_ai.core.telemetry_hub import TelemetryHub
+                tid = getattr(self, "_current_task_id", "default")
+                if getattr(self, "_stop_requested", False):
+                    TelemetryHub.get_instance().cancel_task(tid, reason="User requested stop")
+                elif self._status == AgentStatus.FAILED:
+                    TelemetryHub.get_instance().complete_task(tid, success=False, final_summary="Task failed")
+                else:
+                    TelemetryHub.get_instance().complete_task(tid, success=True, final_summary="Completed")
+            except Exception:
+                pass
+
             if self._status in (AgentStatus.OBSERVING, AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.COMPLETED, AgentStatus.STOPPED):
                 self._status = AgentStatus.IDLE
 
@@ -1738,14 +2293,16 @@ class ConversationalComputerUseAgent:
         if steering:
             steering_text = "\n⚠️ USER MID-TASK GUIDANCE / INSTRUCTIONS:\n" + "\n".join(f"- {s}" for s in steering)
 
-        # Retrieve live battery/system state if available
+        # Retrieve live battery/system telemetry from Seyal AI Telemetry Service
         system_status_line = ""
         try:
-            import psutil
-            battery = psutil.sensors_battery()
-            if battery:
-                plug_str = "Plugged In (Charging)" if battery.power_plugged else "On Battery"
-                system_status_line = f"LIVE SYSTEM STATUS: Battery {battery.percent}%, {plug_str}\n"
+            from seyal_ai.services.seyal_ai_service import seyal_ai_service
+            snap = seyal_ai_service.get_live_telemetry_snapshot()
+            bat_text = snap["battery"]["status_text"]
+            win_text = snap["active_window"]
+            cpu_val = snap["hardware"]["cpu_percent"]
+            ram_val = snap["hardware"]["ram_percent"]
+            system_status_line = f"LIVE SEYAL AI TELEMETRY: Battery {bat_text} | Active Window: '{win_text}' | Load: CPU {cpu_val}%, RAM {ram_val}%\n"
         except Exception:
             pass
 

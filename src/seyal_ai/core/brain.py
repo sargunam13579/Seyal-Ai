@@ -15,6 +15,7 @@ This is the main entry point for processing user requests.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +74,8 @@ class SeyalAiBrain:
         self._context = ContextManager(
             max_turns=self._settings.memory.working_memory_max_turns,
         )
+        self._contexts: dict[str, ContextManager] = {}
+        self._context_locks: dict[str, asyncio.Lock] = {}
         self._executor = ToolExecutor(
             registry=self._registry,
             max_retries=self._settings.llm.max_retries,
@@ -161,7 +164,63 @@ class SeyalAiBrain:
             assistant_name=self._identity.name,
         )
         self._context.set_system_prompt(system_prompt)
+        for ctx in self._contexts.values():
+            ctx.set_system_prompt(system_prompt)
         log.debug("System prompt refreshed for assistant '%s'", self._identity.name)
+
+    def get_conversation_lock(self, conversation_id: str | None = None) -> asyncio.Lock:
+        """Get or create an asyncio.Lock for a specific conversation to prevent concurrent race conditions."""
+        key = conversation_id or "__global__"
+        if key not in self._context_locks:
+            self._context_locks[key] = asyncio.Lock()
+        return self._context_locks[key]
+
+    async def get_or_hydrate_context(self, conversation_id: str | None = None) -> ContextManager:
+        """
+        Get the ContextManager for the given conversation_id, or hydrate it from
+        the database if this is a restored session or cache miss.
+        """
+        if not conversation_id:
+            return self._context
+
+        if conversation_id in self._contexts:
+            return self._contexts[conversation_id]
+
+        # Create isolated context for this conversation
+        ctx = ContextManager(
+            max_turns=self._settings.memory.working_memory_max_turns,
+        )
+        ctx.set_system_prompt(self._context.system_prompt)
+
+        # Hydrate historical messages from the database
+        try:
+            from seyal_ai.database.engine import get_session
+            from seyal_ai.database.repositories.conversation import ConversationRepository
+
+            async with get_session() as session:
+                repo = ConversationRepository(session)
+                # Fetch recent messages (up to 20, returned chronologically)
+                history = await repo.get_messages(conversation_id, limit=20)
+                for msg in history:
+                    if msg.role == "user":
+                        ctx.add_user_message(msg.content or "")
+                    elif msg.role == "assistant":
+                        ctx.add_assistant_message(msg.content or "")
+                log.info(
+                    "Hydrated conversation '%s' with %d historical message(s) from database.",
+                    conversation_id,
+                    len(history),
+                )
+        except Exception as err:
+            log.warning("Notice during conversation hydration for '%s': %s", conversation_id, err)
+
+        # Maintain bounded cache (prune if > 50 cached conversations)
+        if len(self._contexts) > 50:
+            oldest_key = next(iter(self._contexts))
+            del self._contexts[oldest_key]
+
+        self._contexts[conversation_id] = ctx
+        return ctx
 
     def _register_tools(self) -> None:
         """Register all available tools."""
@@ -199,7 +258,12 @@ class SeyalAiBrain:
                     return target
         return None
 
-    async def process(self, user_input: str, allow_tools: bool = True) -> str:
+    async def process(
+        self,
+        user_input: str,
+        allow_tools: bool = True,
+        conversation_id: str | None = None,
+    ) -> str:
         """
         Process a user input and return the response.
 
@@ -208,6 +272,7 @@ class SeyalAiBrain:
         Args:
             user_input: The user's message or command.
             allow_tools: Whether system/laptop tools are allowed for execution.
+            conversation_id: Unique conversation identifier for multi-session isolation and persistence hydration.
 
         Returns:
             Seyal AI's response as a string.
@@ -277,19 +342,44 @@ class SeyalAiBrain:
                 self._audio_feedback.on_error()
             return task_result.final_output
 
-        # Step 8: Single-turn request through agentic orchestrator
+        # Step 8: Single-turn request through agentic orchestrator with conversation isolation & lock
         tier = self._classify_tier(clean_input)
 
-        response = await self._orchestrator.process(
-            user_input=clean_input,
-            tier=tier,
-            show_thinking=self._settings.ui.show_thinking,
-            allow_tools=allow_tools,
-        )
+        lock = self.get_conversation_lock(conversation_id)
+        async with lock:
+            active_ctx = await self.get_or_hydrate_context(conversation_id)
+
+            # Context & reference resolution for pronouns ("that file", "my python project", "it")
+            enriched_input = clean_input
+            try:
+                resolved = await self._memory.resolver.resolve_reference(
+                    user_input=clean_input,
+                    recent_dialog_turns=active_ctx.get_recent_turns(3),
+                )
+                if resolved:
+                    ref_context = ", ".join(f"{k}: {v}" for k, v in resolved.items() if v)
+                    if ref_context:
+                        enriched_input = f"{clean_input}\n[Context References Resolved: {ref_context}]"
+                        log.info("Resolved conversational references: %s", ref_context)
+            except Exception as ref_err:
+                log.debug("Notice during reference resolution: %s", ref_err)
+
+            response = await self._orchestrator.process(
+                user_input=enriched_input,
+                tier=tier,
+                show_thinking=self._settings.ui.show_thinking,
+                allow_tools=allow_tools,
+                context=active_ctx,
+            )
         self._audio_feedback.on_success()
         return response
 
-    async def process_stream(self, user_input: str, allow_tools: bool = False):
+    async def process_stream(
+        self,
+        user_input: str,
+        allow_tools: bool = False,
+        conversation_id: str | None = None,
+    ):
         """
         Process user input and stream response chunks in real-time.
         """
@@ -299,12 +389,31 @@ class SeyalAiBrain:
         clean_input = user_input.strip()
         tier = self._classify_tier(clean_input)
 
-        async for chunk in self._orchestrator.process_stream(
-            user_input=clean_input,
-            tier=tier,
-            allow_tools=allow_tools,
-        ):
-            yield chunk
+        lock = self.get_conversation_lock(conversation_id)
+        async with lock:
+            active_ctx = await self.get_or_hydrate_context(conversation_id)
+
+            # Context & reference resolution for pronouns in streaming
+            enriched_input = clean_input
+            try:
+                resolved = await self._memory.resolver.resolve_reference(
+                    user_input=clean_input,
+                    recent_dialog_turns=active_ctx.get_recent_turns(3),
+                )
+                if resolved:
+                    ref_context = ", ".join(f"{k}: {v}" for k, v in resolved.items() if v)
+                    if ref_context:
+                        enriched_input = f"{clean_input}\n[Context References Resolved: {ref_context}]"
+            except Exception as ref_err:
+                log.debug("Notice during streaming reference resolution: %s", ref_err)
+
+            async for chunk in self._orchestrator.process_stream(
+                user_input=enriched_input,
+                tier=tier,
+                allow_tools=allow_tools,
+                context=active_ctx,
+            ):
+                yield chunk
 
     def request_name_change(self, target_name: str) -> str:
         """
@@ -377,10 +486,17 @@ class SeyalAiBrain:
         # Use FAST model for everything else
         return ModelTier.FAST
 
-    def reset_conversation(self) -> None:
+    def reset_conversation(self, conversation_id: str | None = None) -> None:
         """Reset the conversation context for a fresh start."""
+        if conversation_id:
+            if conversation_id in self._contexts:
+                self._contexts[conversation_id].clear()
+                del self._contexts[conversation_id]
+        else:
+            self._context.clear()
+            self._contexts.clear()
         self._orchestrator.reset()
-        log.info("Conversation reset")
+        log.info("Conversation reset (conversation_id=%s)", conversation_id)
 
     # --- Voice Pipeline (Phase 2) ---
 

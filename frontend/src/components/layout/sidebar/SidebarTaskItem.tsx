@@ -62,6 +62,7 @@ export const SidebarTaskItem: React.FC<SidebarTaskItemProps> = ({
 
   return (
     <div
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 54px' }}
       className={`relative w-full rounded-2xl group transition-all duration-200 border my-2 ${
         isMenuOpen ? 'z-30 ' : ''
       }${

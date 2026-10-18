@@ -9,6 +9,8 @@ import type {
   DeviceNode,
   ActivityEvent,
   MessageItem,
+  StepItem,
+  ConversationSummary,
 } from '../types';
 import { loadSavedRadialOrder, saveRadialOrder } from '../config/radialActionsConfig';
 
@@ -62,6 +64,17 @@ interface SeyalAiContextType {
   setComputerUseMessages: React.Dispatch<React.SetStateAction<MessageItem[]>>;
   computerUseConversationId: string | null;
   setComputerUseConversationId: (id: string | null) => void;
+  isTaskExecuting: boolean;
+  setIsTaskExecuting: (executing: boolean) => void;
+  agentStatus: string;
+  setAgentStatus: (status: string) => void;
+  liveSteps: StepItem[];
+  setLiveSteps: React.Dispatch<React.SetStateAction<StepItem[]>>;
+  conversations: ConversationSummary[];
+  setConversations: React.Dispatch<React.SetStateAction<ConversationSummary[]>>;
+  pinnedConversationIds: string[];
+  setPinnedConversationIds: React.Dispatch<React.SetStateAction<string[]>>;
+  togglePinConversation: (id: string) => void;
   refreshState: () => Promise<void>;
   requestNameChange: (targetName: string) => Promise<string>;
   confirmAction: (confirmed: boolean) => Promise<{ success: boolean; message: string }>;
@@ -198,6 +211,42 @@ export const SeyalAiProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Conversational Computer-Use Agent conversation states
   const [computerUseConversationId, setComputerUseConversationId] = useState<string | null>(null);
+
+  // Global Agent Execution & Status States (Single Source of Truth)
+  const [isTaskExecuting, setIsTaskExecuting] = useState<boolean>(false);
+  const [agentStatus, setAgentStatus] = useState<string>('idle');
+  const [liveSteps, setLiveSteps] = useState<StepItem[]>([]);
+
+  // Global Conversation History & Pinned States
+  const [conversations, setConversations] = useState<ConversationSummary[]>(() => {
+    try {
+      const cached = localStorage.getItem('seyal_agent_conv_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>(() => {
+    try {
+      const stored =
+        localStorage.getItem('seyal_pinned_agent_task_ids') ||
+        localStorage.getItem('seyal_pinned_conversation_ids');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const togglePinConversation = useCallback((id: string) => {
+    setPinnedConversationIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      try {
+        localStorage.setItem('seyal_pinned_agent_task_ids', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
   const [computerUseMessages, setComputerUseMessages] = useState<MessageItem[]>([]);
 
   const activeConversationId = computerUseConversationId;
@@ -300,11 +349,34 @@ export const SeyalAiProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [pendingConfirmationPrompt]);
 
   useEffect(() => {
-    if (isBackendConnected) {
-      refreshState();
-      const interval = setInterval(refreshState, 15000);
-      return () => clearInterval(interval);
-    }
+    if (!isBackendConnected) return;
+
+    let interval: any = null;
+
+    const startInterval = () => {
+      if (interval) clearInterval(interval);
+      if (!document.hidden) {
+        interval = setInterval(refreshState, 15000);
+      }
+    };
+
+    refreshState();
+    startInterval();
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (interval) clearInterval(interval);
+      } else {
+        refreshState();
+        startInterval();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [refreshState, isBackendConnected]);
 
   const requestNameChange = async (targetName: string): Promise<string> => {
@@ -418,6 +490,17 @@ export const SeyalAiProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setComputerUseMessages,
         computerUseConversationId,
         setComputerUseConversationId,
+        isTaskExecuting,
+        setIsTaskExecuting,
+        agentStatus,
+        setAgentStatus,
+        liveSteps,
+        setLiveSteps,
+        conversations,
+        setConversations,
+        pinnedConversationIds,
+        setPinnedConversationIds,
+        togglePinConversation,
         refreshState,
         requestNameChange,
         confirmAction,

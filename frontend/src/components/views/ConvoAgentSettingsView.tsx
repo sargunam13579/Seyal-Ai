@@ -15,24 +15,55 @@ import {
   HardDrive,
   Database,
   Brain,
+  Cpu,
+  Network,
 } from 'lucide-react';
 import { useSeyalAi } from '../../context/SeyalAiContext';
-import {
-  GeneralTab,
-  AccountTab,
-  UpgradePlanTab,
-  ComputerAwarenessTab,
-  PermissionsTab,
-  NotificationsTab,
-  PersonalizationTab,
-  UserKnowledgeTab,
-  VoiceTab,
-  AgentTaskManagerTab,
-  SafetyTab,
-  SecurityLoginTab,
-  StorageTab,
-  DataControlsTab,
-} from '../settings/tabs';
+
+// Statically import the default landing tab (GeneralTab) for instant 0ms rendering
+import { GeneralTab } from '../settings/tabs/GeneralTab';
+
+// Dynamic code-splitting: Lazy-load individual settings tabs on demand
+const AccountTab = React.lazy(() => import('../settings/tabs/AccountTab').then((m) => ({ default: m.AccountTab })));
+const UpgradePlanTab = React.lazy(() => import('../settings/tabs/UpgradePlanTab').then((m) => ({ default: m.UpgradePlanTab })));
+const ComputerAwarenessTab = React.lazy(() => import('../settings/tabs/ComputerAwarenessTab').then((m) => ({ default: m.ComputerAwarenessTab })));
+const PermissionsTab = React.lazy(() => import('../settings/tabs/PermissionsTab').then((m) => ({ default: m.PermissionsTab })));
+const NotificationsTab = React.lazy(() => import('../settings/tabs/NotificationsTab').then((m) => ({ default: m.NotificationsTab })));
+const PersonalizationTab = React.lazy(() => import('../settings/tabs/PersonalizationTab').then((m) => ({ default: m.PersonalizationTab })));
+const UserKnowledgeTab = React.lazy(() => import('../settings/tabs/UserKnowledgeTab').then((m) => ({ default: m.UserKnowledgeTab })));
+const VoiceTab = React.lazy(() => import('../settings/tabs/VoiceTab').then((m) => ({ default: m.VoiceTab })));
+const AgentTaskManagerTab = React.lazy(() => import('../settings/tabs/AgentTaskManagerTab').then((m) => ({ default: m.AgentTaskManagerTab })));
+const SafetyTab = React.lazy(() => import('../settings/tabs/SafetyTab').then((m) => ({ default: m.SafetyTab })));
+const SecurityLoginTab = React.lazy(() => import('../settings/tabs/SecurityLoginTab').then((m) => ({ default: m.SecurityLoginTab })));
+const StorageTab = React.lazy(() => import('../settings/tabs/StorageTab').then((m) => ({ default: m.StorageTab })));
+const DataControlsTab = React.lazy(() => import('../settings/tabs/DataControlsTab').then((m) => ({ default: m.DataControlsTab })));
+const AiModelsTab = React.lazy(() => import('../settings/tabs/AiModelsTab').then((m) => ({ default: m.AiModelsTab })));
+const McpIntegrationsTab = React.lazy(() => import('../settings/tabs/McpIntegrationsTab').then((m) => ({ default: m.McpIntegrationsTab })));
+
+// Background prefetch cache for zero-latency tab switching on hover
+const TAB_LOADERS: Record<string, () => Promise<any>> = {
+  account: () => import('../settings/tabs/AccountTab'),
+  upgrade_plan: () => import('../settings/tabs/UpgradePlanTab'),
+  ai_models: () => import('../settings/tabs/AiModelsTab'),
+  computer_control: () => import('../settings/tabs/ComputerAwarenessTab'),
+  mcp_integrations: () => import('../settings/tabs/McpIntegrationsTab'),
+  permissions: () => import('../settings/tabs/PermissionsTab'),
+  notifications: () => import('../settings/tabs/NotificationsTab'),
+  personalization: () => import('../settings/tabs/PersonalizationTab'),
+  user_knowledge: () => import('../settings/tabs/UserKnowledgeTab'),
+  voice: () => import('../settings/tabs/VoiceTab'),
+  agent_task_manager: () => import('../settings/tabs/AgentTaskManagerTab'),
+  safety: () => import('../settings/tabs/SafetyTab'),
+  security_login: () => import('../settings/tabs/SecurityLoginTab'),
+  storage: () => import('../settings/tabs/StorageTab'),
+  data_controls: () => import('../settings/tabs/DataControlsTab'),
+};
+
+const prefetchTab = (tabId: string) => {
+  if (TAB_LOADERS[tabId]) {
+    TAB_LOADERS[tabId]().catch(() => {});
+  }
+};
 
 interface SidebarItem {
   id: string;
@@ -59,7 +90,9 @@ export const ConvoAgentSettingsView: React.FC = () => {
     { id: 'general', label: 'General', icon: Settings },
     { id: 'account', label: 'Account', icon: User },
     { id: 'upgrade_plan', label: 'Upgrade plan', icon: Sparkles },
+    { id: 'ai_models', label: 'AI Models & Providers', icon: Cpu },
     { id: 'computer_control', label: 'Computer Awareness & Control', icon: Laptop },
+    { id: 'mcp_integrations', label: 'MCP & Integrations', icon: Network },
     { id: 'permissions', label: 'Permissions', icon: ShieldCheck },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'personalization', label: 'Personalization', icon: Sliders },
@@ -115,6 +148,7 @@ export const ConvoAgentSettingsView: React.FC = () => {
                 <button
                   key={item.id}
                   type="button"
+                  onMouseEnter={() => prefetchTab(item.id)}
                   onClick={() => {
                     setActiveTab(item.id);
                     setActiveSettingsTab(item.id);
@@ -149,31 +183,48 @@ export const ConvoAgentSettingsView: React.FC = () => {
 
         {/* Right Modular Content Area: Dynamic Render of the 13 Component Tabs */}
         <div className="flex-1 flex flex-col bg-[#080e1d]/85 overflow-hidden">
-          {activeTab === 'general' && <GeneralTab />}
-          {activeTab === 'account' && <AccountTab />}
-          {activeTab === 'upgrade_plan' && <UpgradePlanTab />}
-          {activeTab === 'computer_control' && <ComputerAwarenessTab />}
-          {activeTab === 'permissions' && <PermissionsTab />}
-          {activeTab === 'notifications' && <NotificationsTab />}
-          {activeTab === 'personalization' && <PersonalizationTab />}
-          {activeTab === 'user_knowledge' && (
-            <div className="flex-1 flex flex-col h-full overflow-y-auto p-6 sm:p-8 custom-scrollbar">
-              <UserKnowledgeTab />
-            </div>
+          {/* General Tab renders synchronously with 0ms delay */}
+          {activeTab === 'general' ? (
+            <GeneralTab />
+          ) : (
+            <React.Suspense
+              fallback={
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-cyan-400 font-mono text-xs">
+                  <div className="w-6 h-6 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin mb-3" />
+                  <span className="text-slate-400 text-xs">Loading {sidebarItems.find(s => s.id === activeTab)?.label || 'settings'}...</span>
+                </div>
+              }
+            >
+              {activeTab === 'account' && <AccountTab />}
+              {activeTab === 'upgrade_plan' && <UpgradePlanTab />}
+              {activeTab === 'ai_models' && <AiModelsTab />}
+              {activeTab === 'computer_control' && <ComputerAwarenessTab />}
+              {activeTab === 'mcp_integrations' && <McpIntegrationsTab />}
+              {activeTab === 'permissions' && <PermissionsTab />}
+              {activeTab === 'notifications' && <NotificationsTab />}
+              {activeTab === 'personalization' && <PersonalizationTab />}
+              {activeTab === 'user_knowledge' && (
+                <div className="flex-1 flex flex-col h-full overflow-y-auto p-6 sm:p-8 custom-scrollbar">
+                  <UserKnowledgeTab />
+                </div>
+              )}
+              {activeTab === 'voice' && <VoiceTab />}
+              {activeTab === 'agent_task_manager' && <AgentTaskManagerTab />}
+              {activeTab === 'safety' && <SafetyTab />}
+              {activeTab === 'security_login' && <SecurityLoginTab />}
+              {activeTab === 'storage' && <StorageTab />}
+              {activeTab === 'data_controls' && <DataControlsTab />}
+            </React.Suspense>
           )}
-          {activeTab === 'voice' && <VoiceTab />}
-          {activeTab === 'agent_task_manager' && <AgentTaskManagerTab />}
-          {activeTab === 'safety' && <SafetyTab />}
-          {activeTab === 'security_login' && <SecurityLoginTab />}
-          {activeTab === 'storage' && <StorageTab />}
-          {activeTab === 'data_controls' && <DataControlsTab />}
 
           {/* Fallback Placeholder for Unknown Tab */}
           {![
             'general',
             'account',
             'upgrade_plan',
+            'ai_models',
             'computer_control',
+            'mcp_integrations',
             'permissions',
             'notifications',
             'personalization',

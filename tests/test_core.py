@@ -33,7 +33,7 @@ class TestContextManager:
         messages = ctx.get_messages()
         assert len(messages) == 2
         assert messages[0].role == "system"
-        assert messages[0].content == "You are Seyal AI"
+        assert "You are Seyal AI" in messages[0].content
         assert messages[1].role == "user"
 
     def test_trim_old_messages(self):

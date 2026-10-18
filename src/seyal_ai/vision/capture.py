@@ -192,7 +192,8 @@ class ScreenCaptureController:
             mss: Any = importlib.import_module("mss")
 
             with mss.MSS() as sct:
-                monitor = sct.monitors[0]
+                # Target primary monitor if multiple exist to match active GUI coordinates
+                monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
                 sct_img = sct.grab(monitor)
                 img = Image.frombytes("RGB", sct_img.size, sct_img.rgb)
         except Exception as e:

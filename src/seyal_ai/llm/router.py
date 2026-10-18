@@ -20,6 +20,35 @@ from seyal_ai.utils.logging import get_logger
 log = get_logger("llm.router")
 
 
+# Default models per provider and tier to prevent passing incompatible model names on fallback
+PROVIDER_DEFAULT_MODELS: dict[str, dict[ModelTier, str]] = {
+    "gemini": {
+        ModelTier.FAST: "gemini-flash-lite-latest",
+        ModelTier.SMART: "gemini-flash-lite-latest",
+        ModelTier.VISION: "gemini-flash-lite-latest",
+        ModelTier.LOCAL: "gemini-flash-lite-latest",
+    },
+    "openai": {
+        ModelTier.FAST: "gpt-4o-mini",
+        ModelTier.SMART: "gpt-4o",
+        ModelTier.VISION: "gpt-4o",
+        ModelTier.LOCAL: "gpt-4o-mini",
+    },
+    "anthropic": {
+        ModelTier.FAST: "claude-3-5-haiku-latest",
+        ModelTier.SMART: "claude-3-5-sonnet-latest",
+        ModelTier.VISION: "claude-3-5-sonnet-latest",
+        ModelTier.LOCAL: "claude-3-5-haiku-latest",
+    },
+    "ollama": {
+        ModelTier.FAST: "llama3",
+        ModelTier.SMART: "llama3",
+        ModelTier.VISION: "llava",
+        ModelTier.LOCAL: "llama3",
+    },
+}
+
+
 class ModelRouter:
     """
     Routes LLM requests to the appropriate provider and model.
@@ -82,7 +111,8 @@ class ModelRouter:
         """
         Resolve the provider and model name for a given tier.
 
-        Falls through to available providers if the preferred one isn't configured.
+        Falls through to available providers if the preferred one isn't configured,
+        resolving the appropriate model name for the fallback provider.
         """
         cfg = self._settings.llm
 
@@ -104,12 +134,14 @@ class ModelRouter:
         if tier != ModelTier.LOCAL:
             for name, provider in self._providers.items():
                 if name != "ollama":
+                    fallback_model = PROVIDER_DEFAULT_MODELS.get(name, {}).get(tier, model)
                     log.warning(
-                        "Preferred provider '%s' unavailable, falling back to '%s'",
+                        "Preferred provider '%s' unavailable, falling back to '%s' (model='%s')",
                         preferred_provider_name,
                         name,
+                        fallback_model,
                     )
-                    return provider, model
+                    return provider, fallback_model
 
         # Last resort: Ollama
         if "ollama" in self._providers:
@@ -145,32 +177,52 @@ class ModelRouter:
         if not self._initialized:
             await self.initialize()
 
-        provider, model = self._resolve_provider_and_model(tier)
+        primary_provider, primary_model = self._resolve_provider_and_model(tier)
         cfg = self._settings.llm
 
-        log.info(
-            "Routing to %s (model=%s, tier=%s)",
-            provider.provider_name,
-            model,
-            tier.value,
-        )
+        candidates: list[tuple[BaseLLMProvider, str]] = [(primary_provider, primary_model)]
+        for p_name, p_inst in self._providers.items():
+            if p_inst != primary_provider:
+                p_models = PROVIDER_DEFAULT_MODELS.get(p_name, {})
+                fallback_m = p_models.get(tier) or p_models.get(ModelTier.FAST) or cfg.local_model
+                candidates.append((p_inst, fallback_m))
 
-        response = await provider.generate(
-            messages=messages,
-            model=model,
-            tools=tools,
-            temperature=temperature or cfg.temperature,
-            max_tokens=max_tokens or cfg.max_tokens,
-        )
+        last_error = None
+        for cand_provider, cand_model in candidates:
+            try:
+                log.info(
+                    "Routing to %s (model=%s, tier=%s)",
+                    cand_provider.provider_name,
+                    cand_model,
+                    tier.value,
+                )
+                response = await cand_provider.generate(
+                    messages=messages,
+                    model=cand_model,
+                    tools=tools,
+                    temperature=temperature or cfg.temperature,
+                    max_tokens=max_tokens or cfg.max_tokens,
+                )
 
-        if response.usage:
-            log.debug(
-                "Token usage: prompt=%d, completion=%d",
-                response.usage.get("prompt_tokens", 0),
-                response.usage.get("completion_tokens", 0),
-            )
+                if response.usage:
+                    log.debug(
+                        "Token usage: prompt=%d, completion=%d",
+                        response.usage.get("prompt_tokens", 0),
+                        response.usage.get("completion_tokens", 0),
+                    )
 
-        return response
+                return response
+            except Exception as err:
+                log.warning(
+                    "Provider %s failed with error: %s. Attempting fallback if available...",
+                    cand_provider.provider_name,
+                    err,
+                )
+                last_error = err
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("All available LLM providers failed to generate response.")
 
     async def generate_stream(
         self,
@@ -182,28 +234,53 @@ class ModelRouter:
     ):
         """
         Generate a streaming LLM response, yielding text delta chunks as they arrive.
+        Supports automatic runtime fallback if the primary provider fails at connection.
         """
         if not self._initialized:
             await self.initialize()
 
-        provider, model = self._resolve_provider_and_model(tier)
+        primary_provider, primary_model = self._resolve_provider_and_model(tier)
         cfg = self._settings.llm
 
-        log.info(
-            "Routing stream to %s (model=%s, tier=%s)",
-            provider.provider_name,
-            model,
-            tier.value,
-        )
+        candidates: list[tuple[BaseLLMProvider, str]] = [(primary_provider, primary_model)]
+        for p_name, p_inst in self._providers.items():
+            if p_inst != primary_provider:
+                p_models = PROVIDER_DEFAULT_MODELS.get(p_name, {})
+                fallback_m = p_models.get(tier) or p_models.get(ModelTier.FAST) or cfg.local_model
+                candidates.append((p_inst, fallback_m))
 
-        async for chunk in provider.generate_stream(
-            messages=messages,
-            model=model,
-            tools=tools,
-            temperature=temperature or cfg.temperature,
-            max_tokens=max_tokens or cfg.max_tokens,
-        ):
-            yield chunk
+        last_error = None
+        for cand_provider, cand_model in candidates:
+            try:
+                log.info(
+                    "Routing stream to %s (model=%s, tier=%s)",
+                    cand_provider.provider_name,
+                    cand_model,
+                    tier.value,
+                )
+                yielded_any = False
+                async for chunk in cand_provider.generate_stream(
+                    messages=messages,
+                    model=cand_model,
+                    tools=tools,
+                    temperature=temperature or cfg.temperature,
+                    max_tokens=max_tokens or cfg.max_tokens,
+                ):
+                    yielded_any = True
+                    yield chunk
+
+                if yielded_any:
+                    return
+            except Exception as err:
+                log.warning(
+                    "Streaming provider %s failed with error: %s. Trying fallback...",
+                    cand_provider.provider_name,
+                    err,
+                )
+                last_error = err
+
+        if last_error:
+            raise last_error
 
     @property
     def available_providers(self) -> list[str]:

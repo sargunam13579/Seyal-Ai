@@ -55,18 +55,23 @@ class ToolRegistry:
     def list_tools(
         self,
         category: str | None = None,
+        categories: set[str] | list[str] | None = None,
         target_device: TargetDevice | None = None,
     ) -> list[BaseTool]:
         """
         List all registered tools, optionally filtered.
 
         Args:
-            category: Filter by tool category (e.g., 'system', 'files').
+            category: Filter by single tool category (e.g., 'system', 'files').
+            categories: Filter by multiple tool categories.
             target_device: Filter by target device.
         """
         tools = list(self._tools.values())
         if category:
             tools = [t for t in tools if t.category == category]
+        elif categories:
+            cat_filter = set(categories)
+            tools = [t for t in tools if t.category in cat_filter]
         if target_device:
             tools = [
                 t
@@ -78,19 +83,25 @@ class ToolRegistry:
     def get_schemas(
         self,
         category: str | None = None,
+        categories: set[str] | list[str] | None = None,
         target_device: TargetDevice | None = None,
     ) -> list[ToolSchema]:
         """
         Generate LLM-compatible tool schemas for function calling.
 
         Args:
-            category: Filter by category.
+            category: Filter by a single category.
+            categories: Filter by multiple categories.
             target_device: Filter by target device.
 
         Returns:
             List of ToolSchema objects ready for the LLM.
         """
-        tools = self.list_tools(category=category, target_device=target_device)
+        tools = self.list_tools(
+            category=category,
+            categories=categories,
+            target_device=target_device,
+        )
         return [
             ToolSchema(
                 name=tool.name,

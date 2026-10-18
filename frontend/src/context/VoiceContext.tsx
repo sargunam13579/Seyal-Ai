@@ -16,8 +16,14 @@ interface VoiceContextType {
   voiceState: VoiceStateType;
   isListening: boolean;
   isSpeaking: boolean;
+  isUserSpeaking: boolean;
   isProcessing: boolean;
   voiceModeEnabled: boolean;
+  isMuted: boolean;
+  setIsMuted: (muted: boolean) => void;
+  toggleMute: () => void;
+  autoListen: boolean;
+  setAutoListen: (auto: boolean) => void;
   autoVoiceResponse: boolean;
   recognitionLang: string;
   setRecognitionLang: (lang: string) => void;
@@ -50,15 +56,21 @@ interface VoiceContextType {
     onEnd?: () => void,
     onStart?: (durationSec?: number) => void,
     onProgress?: (revealedText: string) => void,
-    overrideVoiceId?: string
+    overrideVoiceId?: string,
+    preloadedAudioBlob?: Blob | null
   ) => Promise<void>;
+  preloadAssistantAudio: (text: string, overrideVoiceId?: string) => Promise<Blob | null>;
   cancelCurrentSpeech: (reason?: string) => void;
   stopSpeaking: () => void;
+  isSpeechPaused: boolean;
+  pauseSpeech: () => void;
+  resumeSpeech: () => void;
   testVoice: (voiceName?: string) => Promise<void>;
   getNextTurnId: () => number;
   getCurrentTurnId: () => number;
   invalidateTurn: () => number;
   registerTranscriptHandler: (handler: (text: string) => void) => () => void;
+  registerBargeInHandler: (handler: () => void) => () => void;
   setProcessing: (processing: boolean) => void;
 }
 
@@ -208,26 +220,12 @@ export function containsTamilScript(text: string): boolean {
  */
 export function downsampleBuffer(buffer: Float32Array, inputRate: number, targetRate = 16000): Float32Array {
   if (inputRate === targetRate || inputRate <= 0) return buffer;
-  const sampleRateRatio = inputRate / targetRate;
-  const newLength = Math.round(buffer.length / sampleRateRatio);
+  const ratio = inputRate / targetRate;
+  const newLength = Math.floor(buffer.length / ratio);
   const result = new Float32Array(newLength);
-
-  let offsetResult = 0;
-  let offsetBuffer = 0;
-
-  while (offsetResult < result.length) {
-    const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-    let accum = 0;
-    let count = 0;
-    for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-      accum += buffer[i];
-      count++;
-    }
-    result[offsetResult] = count > 0 ? accum / count : 0;
-    offsetResult++;
-    offsetBuffer = nextOffsetBuffer;
+  for (let i = 0; i < newLength; i++) {
+    result[i] = buffer[Math.floor(i * ratio)];
   }
-
   return result;
 }
 
@@ -273,16 +271,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [autoVoiceResponse, setAutoVoiceResponse] = useState<boolean>(true);
   const [recognitionLang, setRecognitionLangState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('seyal_recognition_lang');
-      if (!stored || stored === 'en-IN' || stored === 'en-US') {
-        localStorage.setItem('seyal_recognition_lang', 'auto');
-        return 'auto';
-      }
-      return stored;
+      localStorage.setItem('seyal_recognition_lang', 'auto');
     }
     return 'auto';
   });
-  const recognitionLangRef = useRef<string>(recognitionLang);
+  const recognitionLangRef = useRef<string>('auto');
   const [speechSpeed, setSpeechSpeedState] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(LOCAL_STORAGE_SPEED_KEY);
@@ -321,8 +314,38 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
   const [availableVoices, setAvailableVoices] = useState<AvailableVoiceInfo[]>(DEFAULT_NEURAL_VOICES);
   const [transcript, setTranscript] = useState<string>('');
-  const [interimTranscript, setInterimTranscript] = useState<string>('');
+  const [interimTranscript, setInterimTranscriptState] = useState<string>('');
+  const interimTranscriptRef = useRef<string>('');
+  const setInterimTranscript = useCallback((val: string | ((prev: string) => string)) => {
+    setInterimTranscriptState((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      interimTranscriptRef.current = next;
+      return next;
+    });
+  }, []);
+  const [isUserSpeaking, setIsUserSpeaking] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSpeechPaused, setIsSpeechPaused] = useState<boolean>(false);
+  const isSpeechPausedRef = useRef<boolean>(false);
+
+  // Global Master Microphone Mute & Auto-Listen State (Single Source of Truth)
+  const [isMuted, setIsMutedState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('seyal_mic_muted') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const isMutedRef = useRef<boolean>(isMuted);
+
+  const [autoListen, setAutoListenState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('seyal_auto_listen') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const autoListenRef = useRef<boolean>(autoListen);
 
   const setRecognitionLang = useCallback((lang: string) => {
     recognitionLangRef.current = lang;
@@ -330,9 +353,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (typeof window !== 'undefined') {
       localStorage.setItem('seyal_recognition_lang', lang);
     }
+    // Update live WebSocket backend config if connected
+    if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        voiceWsRef.current.send(JSON.stringify({ type: 'config', language: lang }));
+      } catch {
+        // ignore
+      }
+    }
     if (recognitionRef.current && isRecognitionActiveRef.current) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch {
         // ignore
       }
@@ -452,6 +483,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, []);
 
+  const bargeInListenersRef = useRef<Set<() => void>>(new Set());
+  const registerBargeInHandler = useCallback((handler: () => void) => {
+    bargeInListenersRef.current.add(handler);
+    return () => {
+      bargeInListenersRef.current.delete(handler);
+    };
+  }, []);
+
   // Pre-load available voices from browser & merge with Neural voices
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -483,7 +522,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const cancelCurrentSpeech = useCallback((reason = 'manual') => {
     console.log(`[TTS CANCELLED] reason=${reason} turnId=${activeTurnIdRef.current}`);
     isSpeakingRef.current = false;
+    isSpeechPausedRef.current = false;
+    setIsSpeechPaused(false);
     lastSpeechEndTimeRef.current = Date.now();
+
+    // If speech was cancelled due to barge-in, immediately alert all registered view listeners
+    if (reason && reason.includes('barge_in')) {
+      bargeInListenersRef.current.forEach((fn) => {
+        try {
+          fn();
+        } catch (e) {
+          console.error('[BARGE IN HANDLER ERROR]', e);
+        }
+      });
+    }
 
     if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
       try {
@@ -532,14 +584,69 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     activeUtteranceRef.current = null;
     (window as any).__seyal_active_utterance = null;
 
-    if (!isProcessingRef.current) {
-      setVoiceState((prev) => (prev === 'speaking' ? (voiceModeEnabledRef.current ? 'listening' : 'idle') : prev));
-    }
+    setVoiceState((prev) => (prev === 'speaking' ? (voiceModeEnabledRef.current ? 'listening' : 'idle') : prev));
   }, []);
 
   const stopSpeaking = useCallback(() => {
     cancelCurrentSpeech('stop_request');
   }, [cancelCurrentSpeech]);
+
+  const pauseSpeech = useCallback(() => {
+    if (activeAudioRef.current && !activeAudioRef.current.paused) {
+      try {
+        activeAudioRef.current.pause();
+        isSpeakingRef.current = false;
+        isSpeechPausedRef.current = true;
+        setIsSpeechPaused(true);
+        setVoiceState('idle');
+      } catch (err) {
+        console.error('Failed to pause audio playback:', err);
+      }
+    } else if (
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      window.speechSynthesis.speaking &&
+      !window.speechSynthesis.paused
+    ) {
+      try {
+        window.speechSynthesis.pause();
+        isSpeakingRef.current = false;
+        isSpeechPausedRef.current = true;
+        setIsSpeechPaused(true);
+        setVoiceState('idle');
+      } catch (err) {
+        console.error('Failed to pause speech synthesis:', err);
+      }
+    }
+  }, []);
+
+  const resumeSpeech = useCallback(() => {
+    if (activeAudioRef.current && isSpeechPausedRef.current) {
+      try {
+        activeAudioRef.current.play();
+        isSpeakingRef.current = true;
+        isSpeechPausedRef.current = false;
+        setIsSpeechPaused(false);
+        setVoiceState('speaking');
+      } catch (err) {
+        console.error('Failed to resume audio playback:', err);
+      }
+    } else if (
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      window.speechSynthesis.paused
+    ) {
+      try {
+        window.speechSynthesis.resume();
+        isSpeakingRef.current = true;
+        isSpeechPausedRef.current = false;
+        setIsSpeechPaused(false);
+        setVoiceState('speaking');
+      } catch (err) {
+        console.error('Failed to resume speech synthesis:', err);
+      }
+    }
+  }, []);
 
   const startContinuousListeningRef = useRef<() => void>(() => { });
 
@@ -585,6 +692,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const startContinuousListening = useCallback(() => {
+    if (isMutedRef.current) {
+      console.log('[VOICE] startContinuousListening skipped: microphone is muted.');
+      return;
+    }
     voiceModeEnabledRef.current = true;
     setVoiceModeEnabledState(true);
 
@@ -633,19 +744,37 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const normLast = normalize(lastProcessedTranscriptRef.current?.text || '');
 
       // Acoustic Speaker Echo & Self-Hearing Guard:
-      // If assistant was speaking recently (< 1800ms) or is currently speaking, reject echo of assistant words
+      // If assistant was speaking recently (< 1800ms) or is currently speaking, reject or strip echo of assistant words
       if (isSpeakingRef.current || (now - lastSpeechEndTimeRef.current < 1800)) {
         const lastAssistantWords = normalize(lastAssistantSpokenTextRef.current || '');
 
-        if (
-          lastAssistantWords &&
-          normInput &&
-          (lastAssistantWords.includes(normInput) ||
+        if (lastAssistantWords && normInput) {
+          // 1. Direct or substring containment
+          if (
+            lastAssistantWords.includes(normInput) ||
             normInput.includes(lastAssistantWords) ||
-            (normInput.length < 40 && lastAssistantWords.indexOf(normInput) !== -1))
-        ) {
-          console.log('[VOICE ECHO GUARD] Rejected speaker self-hearing acoustic echo (fallback):', cleanText);
-          return;
+            (normInput.length < 40 && lastAssistantWords.indexOf(normInput) !== -1)
+          ) {
+            console.log('[VOICE ECHO GUARD] Rejected speaker self-hearing acoustic echo (fallback):', cleanText);
+            return;
+          }
+
+          // 2. Strip trailing echo prefix if speech starts with the tail of the assistant's utterance
+          const assistantWordList = lastAssistantWords.split(' ');
+          for (let len = Math.min(4, assistantWordList.length); len >= 1; len--) {
+            const tailPhrase = assistantWordList.slice(-len).join(' ');
+            if (normInput === tailPhrase) {
+              console.log('[VOICE ECHO GUARD] Rejected exact assistant tail echo:', cleanText);
+              return;
+            }
+            if (normInput.startsWith(tailPhrase + ' ')) {
+              const stripped = normInput.slice(tailPhrase.length).trim();
+              console.log(`[VOICE ECHO GUARD] Stripped assistant tail echo "${tailPhrase}", remaining user input: "${stripped}"`);
+              if (!stripped) return;
+              cleanText = stripped;
+              break;
+            }
+          }
         }
       }
 
@@ -668,18 +797,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       lastProcessedTranscriptRef.current = { text: cleanText, time: now };
       console.log('[VOICE] Final transcript accepted & dispatching:', cleanText);
       setTranscript(cleanText);
-      setInterimTranscript('');
-      setError(null);
 
-      // Stop current recognition so old results aren't accumulated for the next sentence
+      // Abort current recognition so old results aren't accumulated for the next sentence
       if (recognitionRef.current) {
         try {
-          recognitionRef.current.stop();
+          recognitionRef.current.abort();
         } catch {
           // ignore
         }
       }
 
+      // 1. Dispatch committed user text to the chat handler first
       if (transcriptHandlerRef.current) {
         try {
           transcriptHandlerRef.current(cleanText);
@@ -694,6 +822,11 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           console.error('[VOICE] Transcript listener error:', listenerErr);
         }
       });
+
+      // 2. Clear interim state in the same render cycle as the committed message mount (Zero blink gap!)
+      setInterimTranscript('');
+      setIsUserSpeaking(false);
+      setError(null);
     };
 
     // 1. Start Hardware Microphone AudioContext VAD (100% Reliable in Electron and Chrome)
@@ -711,28 +844,41 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
         setVoiceState('listening');
-        return;
-      }
-
-      if (mediaStreamRef.current) {
-        try {
-          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-        } catch {
-          // ignore
+      } else {
+        if (mediaStreamRef.current) {
+          try {
+            mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          } catch {
+            // ignore
+          }
+          mediaStreamRef.current = null;
         }
-        mediaStreamRef.current = null;
-      }
 
-      navigator.mediaDevices
-        .getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        })
+        navigator.mediaDevices
+          .getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
         .then(async (stream) => {
           mediaStreamRef.current = stream;
+          const audioTrack = stream.getAudioTracks()[0];
+          if (audioTrack) {
+            const settings = audioTrack.getSettings ? audioTrack.getSettings() : ({} as any);
+            console.log('[VOICE AEC] Microphone AudioTrack active & verified:', {
+              label: audioTrack.label,
+              echoCancellation: settings.echoCancellation ?? 'enabled',
+              noiseSuppression: settings.noiseSuppression ?? 'enabled',
+              autoGainControl: settings.autoGainControl ?? 'enabled',
+              sampleRate: settings.sampleRate,
+              channelCount: settings.channelCount,
+            });
+            if (settings.echoCancellation === false) {
+              console.warn('[VOICE AEC] System notice: Hardware/Browser reported echoCancellation is false. Relying on neural Silero VAD echo rejection.');
+            }
+          }
           try {
             const AudioContextClass =
               window.AudioContext || (window as any).webkitAudioContext;
@@ -791,14 +937,28 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     if (data.event === 'barge_in') {
                       console.log('[REALTIME BARGE-IN] Server barge-in detected! Stopping assistant speech immediately.');
                       cancelCurrentSpeech('realtime_ws_barge_in');
+                      setIsUserSpeaking(true);
+                      setVoiceState('listening');
+                    } else if (data.event === 'speech_started') {
+                      console.log('[REALTIME VAD] Server speech_started received');
+                      setIsUserSpeaking(true);
+                    } else if (data.event === 'interim_transcript' && data.text) {
+                      console.log('[REALTIME STT] Server interim transcript received:', data.text);
+                      setIsUserSpeaking(true);
+                      setInterimTranscript(data.text);
                     } else if (data.event === 'transcript' && data.text) {
                       console.log('[REALTIME STT] Server transcript received:', data.text);
+                      setIsUserSpeaking(false);
+                      setInterimTranscript('');
                       dispatchFinalTranscript(data.text);
                     } else if (data.event === 'stt_empty') {
                       console.warn('[REALTIME STT] Server reported empty speech transcript.');
-                      setError('Voice not recognized. Please speak closer or try again.');
+                      setIsUserSpeaking(false);
+                      setInterimTranscript('');
                     } else if (data.event === 'stt_error') {
                       console.warn('[REALTIME STT] Server STT error:', data.error);
+                      setIsUserSpeaking(false);
+                      setInterimTranscript('');
                     }
                   } catch {
                     // ignore non-json
@@ -855,23 +1015,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               }
               const rms = Math.sqrt(sum / inputData.length);
 
-              // 1. Audio-Level Echo & Full-Duplex Gate:
-              // If assistant is actively preparing, synthesizing, or outputting speech from laptop speakers
-              if (isSpeakingRef.current || isProcessingRef.current) {
-                audioBufferChunksRef.current = [];
-                isAudioSpeakingDetectedRef.current = false;
-                // Gate audio: assistant speaker output is NEVER streamed to STT
-                return;
-              }
-
-              // 2. Post-TTS Acoustic Hangover Decay Guard: ignore speaker reverberation for 500ms after assistant finishes speaking
-              if (Date.now() - lastSpeechEndTimeRef.current < 500) {
-                audioBufferChunksRef.current = [];
-                isAudioSpeakingDetectedRef.current = false;
-                return;
-              }
-
-              // 3. Audio is genuine user environment speech: downsample native audio (e.g. 48kHz) to 16kHz for backend VAD & STT
+              // 1. Full-Duplex Continuous Stream for Real-time Acoustic Barge-In:
+              // Always downsample and stream 16kHz PCM16 audio chunks to backend WebSocket.
+              // When the assistant is speaking, the backend neural VAD evaluates acoustic energy
+              // and speech streaks to differentiate genuine user interruption from speaker reverberation.
               if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
                 const targetRate = 16000;
                 const downsampled = downsampleBuffer(inputData, audioCtx.sampleRate, targetRate);
@@ -887,12 +1034,32 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 }
               }
 
-              // Sound detected above noise floor (0.008 catches natural, soft human speech)
-              if (rms > 0.008) {
+              // 2. Client-side offline fallback buffer management:
+              // If assistant is actively speaking or synthesizing, do not accumulate in the offline fallback buffer.
+              if (isSpeakingRef.current || isProcessingRef.current) {
+                audioBufferChunksRef.current = [];
+                isAudioSpeakingDetectedRef.current = false;
+                return;
+              }
+
+              // 3. Post-TTS Acoustic Hangover Guard for offline buffer: ignore residual speaker reverb
+              if (Date.now() - lastSpeechEndTimeRef.current < 400) {
+                audioBufferChunksRef.current = [];
+                isAudioSpeakingDetectedRef.current = false;
+                return;
+              }
+
+              // Sound detected above noise floor (0.012 catches natural, clear human speech)
+              if (rms > 0.012) {
                 if (!isAudioSpeakingDetectedRef.current) {
                   isAudioSpeakingDetectedRef.current = true;
+                  if (!voiceWsRef.current || voiceWsRef.current.readyState !== WebSocket.OPEN) {
+                    setIsUserSpeaking(true);
+                  }
                 }
-                audioBufferChunksRef.current.push(new Float32Array(inputData));
+                if (!voiceWsRef.current || voiceWsRef.current.readyState !== WebSocket.OPEN) {
+                  audioBufferChunksRef.current.push(new Float32Array(inputData));
+                }
 
                 if (silenceDetectionTimerRef.current) {
                   clearTimeout(silenceDetectionTimerRef.current);
@@ -900,11 +1067,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 }
               } else if (isAudioSpeakingDetectedRef.current) {
                 // Trailing speech buffer to capture ending syllables
-                audioBufferChunksRef.current.push(new Float32Array(inputData));
+                if (!voiceWsRef.current || voiceWsRef.current.readyState !== WebSocket.OPEN) {
+                  audioBufferChunksRef.current.push(new Float32Array(inputData));
+                }
 
                 if (!silenceDetectionTimerRef.current) {
                   silenceDetectionTimerRef.current = setTimeout(async () => {
                     isAudioSpeakingDetectedRef.current = false;
+                    setIsUserSpeaking(false);
                     silenceDetectionTimerRef.current = null;
 
                     const chunks = audioBufferChunksRef.current;
@@ -912,14 +1082,12 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
                     // Need at least ~0.25s of audio to be a real utterance
                     if (chunks.length < 2) {
-                      setInterimTranscript('');
                       return;
                     }
 
                     // If WebSocket is connected and streaming, let the WebSocket handle STT
                     // to prevent duplicate parallel HTTP transcription collisions
                     if (voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN) {
-                      setInterimTranscript('');
                       return;
                     }
 
@@ -976,22 +1144,42 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         .catch((err) => {
           console.warn('[VOICE] Mic permission access error:', err);
         });
+      }
     }
 
-    // 2. Start Web Speech API Recognition in parallel (Browser fallback only; never in Electron or when WebSocket is healthy)
-    const isElectron = typeof window !== 'undefined' && (
-      window.navigator.userAgent.toLowerCase().includes('electron') ||
-      !!(window as any).process?.versions?.electron
-    );
-
-    const isWsActive = voiceWsRef.current && voiceWsRef.current.readyState === WebSocket.OPEN;
-
-    const SpeechRecognition = (!isElectron && !isWsActive) ? (
+    // 2. Start Web Speech API Recognition in parallel for instant live client-side interim words
+    const SpeechRecognition = typeof window !== 'undefined' ? (
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     ) : null;
 
     if (SpeechRecognition) {
       try {
+        // Sync browser SpeechRecognition language with chosen profile:
+        // - 'ta-IN' / 'ta' -> 'ta-IN' (Strict Tamil Unicode Script)
+        // - 'en-US' -> 'en-US' (US English)
+        // - 'en-IN' -> 'en-IN' (Indian English)
+        // - 'auto' / 'tanglish' -> 'en-IN' (Colloquial Indian English & Latin script Tanglish)
+        // This ensures the live interim text and final committed message stay in the EXACT same language and script!
+        const selectedProfile = (recognitionLangRef.current || 'auto').toLowerCase();
+        let activeLang = 'en-IN';
+        if (selectedProfile === 'ta-in' || selectedProfile === 'ta' || selectedProfile === 'tamil') {
+          activeLang = 'ta-IN';
+        } else if (selectedProfile === 'en-us') {
+          activeLang = 'en-US';
+        } else if (selectedProfile === 'en-in') {
+          activeLang = 'en-IN';
+        } else {
+          // 'auto' or 'tanglish'
+          activeLang = 'en-IN';
+        }
+
+        // If recognition is already active with matching language, keep streaming smoothly
+        if (recognitionRef.current && isRecognitionActiveRef.current) {
+          if (recognitionRef.current.lang === activeLang) {
+            return;
+          }
+        }
+
         if (recognitionRef.current) {
           try {
             recognitionRef.current.onstart = null;
@@ -1002,13 +1190,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           } catch {
             // ignore
           }
+          recognitionRef.current = null;
         }
 
         const recognition = new SpeechRecognition();
         recognitionRef.current = recognition;
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = (!recognitionLangRef.current || recognitionLangRef.current === 'auto') ? 'en-IN' : recognitionLangRef.current;
+        recognition.lang = activeLang;
 
         recognition.onstart = () => {
           isRecognitionActiveRef.current = true;
@@ -1040,16 +1229,27 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
           // 1. If assistant is currently speaking:
           if (isSpeakingRef.current) {
-            // Check if user spoke an explicit interruption command
-            const isInterruption = /^(stop|wait|cancel|hold on|pause|quit|niruthu|podhum|போதும்|நிறுத்து|रुको|रुक)/i.test(combinedTranscript);
-            if (isInterruption) {
-              console.log('[VOICE] Intentional user interruption detected:', combinedTranscript);
-              cancelCurrentSpeech('barge_in');
+            const normalize = (t: string) =>
+              t.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, '').replace(/\s+/g, ' ').trim();
+            const normTranscript = normalize(combinedTranscript);
+            const lastAssistantWords = normalize(lastAssistantSpokenTextRef.current || '');
+
+            // Echo filter: only discard if the microphone is merely echoing the assistant's own spoken words
+            const isEcho = Boolean(
+              lastAssistantWords &&
+              normTranscript &&
+              (lastAssistantWords.includes(normTranscript) ||
+                (normTranscript.length < 35 && lastAssistantWords.indexOf(normTranscript) !== -1))
+            );
+
+            if (isEcho) {
+              console.log('[VOICE] Discarding speaker audio echo during assistant speaking:', combinedTranscript);
               return;
             }
-            // Otherwise, it's the assistant's own speaker audio picked up by the microphone -> discard!
-            console.log('[VOICE] Discarding speaker audio during assistant speaking:', combinedTranscript);
-            return;
+
+            // Genuine user interruption: cancel assistant speech immediately and allow user words to stream!
+            console.log('[VOICE] Genuine user interruption detected during assistant speaking:', combinedTranscript);
+            cancelCurrentSpeech('barge_in');
           }
 
           // 2. Post-TTS acoustic hangover window (400ms): discard residual speaker reverb
@@ -1059,6 +1259,7 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
 
           if (combinedTranscript.length > 0) {
+            setIsUserSpeaking(true);
             setInterimTranscript(combinedTranscript);
             console.log('[VOICE] Live speech detected:', combinedTranscript);
 
@@ -1066,13 +1267,20 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               clearTimeout(silenceTimerRef.current);
             }
 
-            // Natural human pause threshold (750ms): prevents premature cutoff of multi-word phrases
+            // Natural human pause threshold (1100ms): prevents premature cutoff of multi-word Tanglish and mixed phrases
             silenceTimerRef.current = setTimeout(() => {
               if (combinedTranscript.length > 0) {
                 console.log('[VOICE] Speech pause detected -> committing speech:', combinedTranscript);
                 dispatchFinalTranscript(combinedTranscript);
+                if (recognitionRef.current) {
+                  try {
+                    recognitionRef.current.abort();
+                  } catch {
+                    // ignore
+                  }
+                }
               }
-            }, 750);
+            }, 1100);
           }
         };
 
@@ -1100,8 +1308,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         recognition.onend = () => {
           isRecognitionActiveRef.current = false;
 
-          // Never restart recognition if assistant is actively speaking!
-          if (voiceModeEnabledRef.current && !isSpeakingRef.current) {
+          // Never restart recognition if assistant is actively speaking or mic is muted!
+          if (voiceModeEnabledRef.current && !isSpeakingRef.current && !isMutedRef.current) {
             if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
             restartTimerRef.current = setTimeout(() => {
               if (startContinuousListeningRef.current && !isSpeakingRef.current) {
@@ -1129,6 +1337,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [startContinuousListening]);
 
   const stopListening = useCallback(() => {
+    voiceModeEnabledRef.current = false;
+    setVoiceModeEnabledState(false);
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
@@ -1149,10 +1359,110 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setVoiceState((prev) => (prev === 'listening' ? 'idle' : prev));
   }, [stopAudioVADRecorder]);
 
+  const toggleMute = useCallback(() => {
+    setIsMutedState((prev) => {
+      const next = !prev;
+      isMutedRef.current = next;
+      try {
+        localStorage.setItem('seyal_mic_muted', String(next));
+      } catch {}
+      if (next) {
+        stopListening();
+      } else {
+        if (autoListenRef.current && startContinuousListeningRef.current) {
+          startContinuousListeningRef.current();
+        }
+      }
+      return next;
+    });
+  }, [stopListening]);
+
+  const setIsMuted = useCallback((muted: boolean) => {
+    isMutedRef.current = muted;
+    setIsMutedState(muted);
+    try {
+      localStorage.setItem('seyal_mic_muted', String(muted));
+    } catch {}
+    if (muted) {
+      stopListening();
+    } else {
+      if (autoListenRef.current && startContinuousListeningRef.current) {
+        startContinuousListeningRef.current();
+      }
+    }
+  }, [stopListening]);
+
+  const setAutoListen = useCallback((enabled: boolean) => {
+    autoListenRef.current = enabled;
+    setAutoListenState(enabled);
+    try {
+      localStorage.setItem('seyal_auto_listen', String(enabled));
+    } catch {}
+    if (!enabled && !isMutedRef.current) {
+      stopListening();
+    } else if (enabled && !isMutedRef.current && startContinuousListeningRef.current) {
+      startContinuousListeningRef.current();
+    }
+  }, [stopListening]);
+
+  // Auto-activate continuous listening on mount if autoListen is enabled and mic is unmuted
+  useEffect(() => {
+    if (autoListenRef.current && !isMutedRef.current) {
+      const timer = setTimeout(() => {
+        if (autoListenRef.current && !isMutedRef.current && startContinuousListeningRef.current) {
+          console.log('[VOICE] Initializing continuous listening on app load...');
+          startContinuousListeningRef.current();
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  /**
+   * Preloads TTS audio for a text phrase in the background.
+   * Returns the downloaded Blob or null, allowing instantaneous 0ms playback when needed.
+   */
+  const preloadAssistantAudio = useCallback(
+    async (text: string, overrideVoiceId?: string): Promise<Blob | null> => {
+      if (!text || !text.trim()) return null;
+      const cleanSpoken = cleanTextForSpeech(text);
+      if (!cleanSpoken) return null;
+
+      const storedVoice = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_STORAGE_VOICE_KEY) : null;
+      let chosenVoiceId = (overrideVoiceId && overrideVoiceId.trim())
+        ? overrideVoiceId
+        : (storedVoice || selectedVoiceNameRef.current || selectedVoiceName || 'en-US-AvaMultilingualNeural');
+
+      if (containsTamilScript(cleanSpoken) && !chosenVoiceId.toLowerCase().startsWith('ta-')) {
+        const isMale = chosenVoiceId.toLowerCase().includes('male') ||
+          chosenVoiceId.toLowerCase().includes('andrew') ||
+          chosenVoiceId.toLowerCase().includes('brian') ||
+          chosenVoiceId.toLowerCase().includes('valluvar') ||
+          chosenVoiceId.toLowerCase().includes('prabhat');
+        chosenVoiceId = isMale ? 'ta-IN-ValluvarNeural' : 'ta-IN-PallaviNeural';
+      }
+
+      const currentSpeed = speechSpeedRef.current || DEFAULT_HUMAN_SPEED;
+      try {
+        const synthPromise = api.synthesizeSpeech(cleanSpoken, chosenVoiceId, currentSpeed);
+        const timeoutPromise = new Promise<Blob | null>((resolve) => setTimeout(() => resolve(null), 12000));
+        const blob = await Promise.race([synthPromise, timeoutPromise]);
+        if (blob && blob.size > 100) {
+          return blob;
+        }
+      } catch (err) {
+        console.warn('[TTS PRELOAD] Background audio synthesis warning:', err);
+      }
+      return null;
+    },
+    [selectedVoiceName]
+  );
+
   /**
    * High-Definition Neural Speech Synthesizer:
    * 1. Uses Edge-TTS Neural backend for pristine, studio-quality MP3 audio (zero clicking, zero robotic artifacts).
-   * 2. Automatically falls back to high-grade browser SpeechSynthesis if offline.
+   * 2. Supports preloaded audio blobs for instant 0ms playback transitions between sentences.
+   * 3. Automatically falls back to high-grade browser SpeechSynthesis if offline.
    */
   const speakAssistantResponse = useCallback(
     async (
@@ -1161,7 +1471,8 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       onEnd?: () => void,
       onStart?: (durationSec?: number) => void,
       onProgress?: (revealedText: string) => void,
-      overrideVoiceId?: string
+      overrideVoiceId?: string,
+      preloadedAudioBlob?: Blob | null
     ) => {
       // 1. Turn validation: check that this turn is still the active/latest request
       if (turnId !== activeTurnIdRef.current) {
@@ -1266,15 +1577,15 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         }
 
-        // Once speaking finishes, automatically resume live listening!
-        if (voiceModeEnabledRef.current && !isProcessingRef.current) {
+        // Once speaking finishes, automatically resume live listening or return to idle!
+        if (voiceModeEnabledRef.current) {
           setVoiceState('listening');
           setTimeout(() => {
             if (startContinuousListeningRef.current) {
               startContinuousListeningRef.current();
             }
           }, 120);
-        } else if (!isProcessingRef.current) {
+        } else {
           setVoiceState('idle');
         }
       };
@@ -1283,15 +1594,17 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       let backendSuccess = false;
       try {
         const currentSpeed = speechSpeedRef.current || DEFAULT_HUMAN_SPEED;
-        let audioBlob: Blob | null = null;
+        let audioBlob: Blob | null = (preloadedAudioBlob && preloadedAudioBlob.size > 100) ? preloadedAudioBlob : null;
 
-        // Try synthesis with generous 15s timeout; avoids premature abort on multi-sentence paragraphs
-        try {
-          const synthPromise = api.synthesizeSpeech(cleanSpoken, chosenVoiceId, currentSpeed);
-          const timeoutPromise = new Promise<Blob | null>((resolve) => setTimeout(() => resolve(null), 15000));
-          audioBlob = await Promise.race([synthPromise, timeoutPromise]);
-        } catch (fetchErr) {
-          console.warn('[TTS] Synthesis network notice:', fetchErr);
+        if (!audioBlob) {
+          // Try synthesis with generous 15s timeout; avoids premature abort on multi-sentence paragraphs
+          try {
+            const synthPromise = api.synthesizeSpeech(cleanSpoken, chosenVoiceId, currentSpeed);
+            const timeoutPromise = new Promise<Blob | null>((resolve) => setTimeout(() => resolve(null), 15000));
+            audioBlob = await Promise.race([synthPromise, timeoutPromise]);
+          } catch (fetchErr) {
+            console.warn('[TTS] Synthesis network notice:', fetchErr);
+          }
         }
 
         if (audioBlob && audioBlob.size > 100) {
@@ -1331,23 +1644,22 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             // Simultaneous word-by-word streaming in exact sync with audio playback
             if (onProgress && rawWords.length > 0) {
               let lastWordCount = 0;
-              const duration = (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
-                ? audio.duration
-                : rawWords.length * 0.35;
-
               progressInterval = setInterval(() => {
                 if (audio.paused || audio.ended) {
                   clearInterval(progressInterval);
                   onProgress(text);
                   return;
                 }
-                const ratio = Math.min(1, Math.max(0, audio.currentTime / duration));
+                const actualDuration = (audio.duration && !isNaN(audio.duration) && audio.duration > 0)
+                  ? audio.duration
+                  : (rawWords.length * 0.35);
+                const ratio = Math.min(1, Math.max(0, audio.currentTime / actualDuration));
                 const wordCount = Math.min(rawWords.length, Math.max(1, Math.ceil(ratio * rawWords.length)));
                 if (wordCount > lastWordCount) {
                   lastWordCount = wordCount;
                   onProgress(rawWords.slice(0, wordCount).join(' '));
                 }
-              }, 100);
+              }, 50);
             }
           };
 
@@ -1551,6 +1863,10 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const startListeningLegacy = useCallback(
     (onFinalTranscript?: (text: string) => void, lang?: string) => {
+      if (isMutedRef.current) {
+        console.log('[VOICE] startListening skipped: microphone is muted.');
+        return;
+      }
       if (lang) {
         recognitionLangRef.current = lang;
         setRecognitionLangState(lang);
@@ -1570,8 +1886,14 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         voiceState,
         isListening: voiceState === 'listening',
         isSpeaking: voiceState === 'speaking',
+        isUserSpeaking: isUserSpeaking || Boolean(interimTranscript),
         isProcessing: voiceState === 'processing',
         voiceModeEnabled,
+        isMuted,
+        setIsMuted,
+        toggleMute,
+        autoListen,
+        setAutoListen,
         autoVoiceResponse,
         recognitionLang,
         setRecognitionLang,
@@ -1595,13 +1917,18 @@ export const VoiceProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         speakText,
         speakInstant,
         speakAssistantResponse,
+        preloadAssistantAudio,
         cancelCurrentSpeech,
         stopSpeaking,
+        isSpeechPaused,
+        pauseSpeech,
+        resumeSpeech,
         testVoice,
         getNextTurnId,
         getCurrentTurnId,
         invalidateTurn,
         registerTranscriptHandler,
+        registerBargeInHandler,
         setProcessing,
       }}
     >

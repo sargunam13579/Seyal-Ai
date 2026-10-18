@@ -36,6 +36,52 @@ ipcMain.handle('open-app', async (_event, appName) => {
   }
 });
 
+// Always on top toggle
+ipcMain.handle('set-always-on-top', (_event, flag) => {
+  if (mainWindow) {
+    mainWindow.setAlwaysOnTop(Boolean(flag));
+    return true;
+  }
+  return false;
+});
+
+// Open system logs directory
+ipcMain.handle('open-logs-folder', async () => {
+  try {
+    const { shell } = require('electron');
+    const os = require('os');
+    const logsPath = path.join(os.homedir(), '.seyal_ai', 'logs');
+    await shell.openPath(logsPath);
+    return true;
+  } catch (err) {
+    console.error('Failed to open logs folder:', err);
+    return false;
+  }
+});
+
+// Windows startup launch setting
+ipcMain.handle('set-auto-launch', (_event, flag) => {
+  try {
+    app.setLoginItemSettings({ openAtLogin: Boolean(flag) });
+    return true;
+  } catch (err) {
+    console.error('Failed to set auto launch:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('get-auto-launch', () => {
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion ? app.getVersion() : '0.1.0';
+});
+
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;

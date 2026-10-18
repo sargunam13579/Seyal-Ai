@@ -47,11 +47,13 @@ class ConversationRepository:
         return conversation
 
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
-        """Get a conversation by ID, with messages eagerly loaded."""
+        """Get a conversation by ID, with messages and tool calls eagerly loaded."""
         result = await self._session.execute(
             select(Conversation)
             .where(Conversation.id == conversation_id)
-            .options(selectinload(Conversation.messages))
+            .options(
+                selectinload(Conversation.messages).selectinload(Message.tool_calls).selectinload(ToolCall.results)
+            )
         )
         return result.scalar_one_or_none()
 
@@ -60,12 +62,16 @@ class ConversationRepository:
         conversation_id: str,
         role: str,
         content: str,
+        model_used: str | None = None,
+        latency_ms: int | None = None,
     ) -> Message:
         """Add a message to a conversation: Supabase first (when connected), then Local SQLite."""
         message = Message(
             conversation_id=conversation_id,
             role=role,
             content=content,
+            model_used=model_used,
+            latency_ms=latency_ms,
         )
         # 1. Supabase first (if connected; queues outbox if offline)
         try:
@@ -89,16 +95,58 @@ class ConversationRepository:
         conversation_id: str,
         limit: int | None = None,
     ) -> list[Message]:
-        """Get messages for a conversation, ordered by timestamp."""
+        """Get messages for a conversation, ordered chronologically (oldest to newest)."""
+        if limit:
+            query = (
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.timestamp.desc())
+                .limit(limit)
+            )
+            result = await self._session.execute(query)
+            messages = list(result.scalars().all())
+            messages.reverse()
+            return messages
+
         query = (
             select(Message)
             .where(Message.conversation_id == conversation_id)
             .order_by(Message.timestamp.asc())
         )
-        if limit:
-            query = query.limit(limit)
         result = await self._session.execute(query)
         return list(result.scalars().all())
+
+    async def edit_message_and_truncate_subsequent(
+        self,
+        conversation_id: str,
+        message_id: str,
+        new_content: str,
+    ) -> Conversation | None:
+        """Edit an existing message and prune subsequent turns to support branching/regeneration."""
+        from sqlalchemy import delete
+
+        result = await self._session.execute(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        target_msg = result.scalar_one_or_none()
+        if not target_msg:
+            return None
+
+        target_msg.content = new_content
+        target_timestamp = target_msg.timestamp
+
+        # Delete subsequent messages in this branch
+        await self._session.execute(
+            delete(Message).where(
+                Message.conversation_id == conversation_id,
+                Message.timestamp > target_timestamp,
+            )
+        )
+        await self._session.commit()
+        return await self.get_conversation(conversation_id)
 
     async def add_tool_call(
         self,
@@ -157,28 +205,54 @@ class ConversationRepository:
         self,
         offset: int = 0,
         limit: int | None = None,
+        query: str | None = None,
     ) -> tuple[list[Conversation], int]:
         """
-        List conversations with optional pagination.
+        List conversations with optional pagination and search query.
         If limit is None or <= 0, fetches all conversations without restriction.
 
         Returns:
             A tuple of (conversations, total_count).
         """
-        from sqlalchemy import func
+        from sqlalchemy import func, or_
+
+        count_stmt = select(func.count()).select_from(Conversation)
+        query_stmt = select(Conversation)
+
+        if query and query.strip():
+            clean_q = f"%{query.strip()}%"
+            matching_msg_conv_ids = (
+                select(Message.conversation_id)
+                .where(Message.content.ilike(clean_q))
+                .distinct()
+                .limit(100)
+            )
+            condition = or_(
+                Conversation.summary.ilike(clean_q),
+                Conversation.id.in_(matching_msg_conv_ids),
+            )
+            count_stmt = count_stmt.where(condition)
+            query_stmt = query_stmt.where(condition)
 
         # Get total count
-        count_result = await self._session.execute(select(func.count()).select_from(Conversation))
+        count_result = await self._session.execute(count_stmt)
         total = count_result.scalar() or 0
 
-        # Get results with optional limit
-        query = select(Conversation).order_by(Conversation.created_at.desc())
+        # Order by latest message timestamp so actively used conversations bubble to top
+        latest_msg_subquery = (
+            select(func.max(Message.timestamp))
+            .where(Message.conversation_id == Conversation.id)
+            .scalar_subquery()
+        )
+        query_stmt = query_stmt.order_by(
+            func.coalesce(latest_msg_subquery, Conversation.created_at).desc()
+        )
         if offset > 0:
-            query = query.offset(offset)
+            query_stmt = query_stmt.offset(offset)
         if limit is not None and limit > 0:
-            query = query.limit(limit)
+            query_stmt = query_stmt.limit(limit)
 
-        result = await self._session.execute(query)
+        result = await self._session.execute(query_stmt)
         conversations = list(result.scalars().all())
         return conversations, total
 

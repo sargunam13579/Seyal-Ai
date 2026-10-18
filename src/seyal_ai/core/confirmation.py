@@ -239,13 +239,20 @@ class ConfirmationManager:
         elif self.is_negative(user_input):
             return await self.reject()
         else:
-            # Ambiguous input — re-prompt the user in their mother tongue / preferred language
+            # Ambiguous input — re-prompt the user in their active / preferred language
             mt, kl = get_user_language_profile()
-            reprompt = (
-                "தயவுசெய்து 'ஆம்' அல்லது 'இல்லை' என்று சொல்லுங்கள்."
-                if is_user_tamil_preferred(mt, kl)
-                else "Please reply 'Yes' or 'No'."
-            )
+            from seyal_ai.llm.prompts.language_guardrail import resolve_response_language
+            lang = resolve_response_language(mt, kl, current_input=user_input)
+            if lang == "ta":
+                reprompt = "தயவுசெய்து 'ஆம்' அல்லது 'இல்லை' என்று சொல்லுங்கள்."
+            elif lang == "hi":
+                reprompt = "कृपया 'हाँ' या 'नहीं' में उत्तर दें।"
+            elif lang == "es":
+                reprompt = "Por favor responda 'Sí' o 'No'."
+            elif lang == "fr":
+                reprompt = "Veuillez répondre par 'Oui' ou 'Non'."
+            else:
+                reprompt = "Please reply 'Yes' or 'No'."
             return ConfirmationStatus.PENDING, (
                 f"{reprompt} {conf.prompt_message}"
             )

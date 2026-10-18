@@ -852,20 +852,50 @@ class DeletePathTool(BaseTool):
             )
 
         try:
-            if target.is_dir():
-                shutil.rmtree(target)
-                return ToolResult.ok(
-                    f"Successfully deleted folder '{target.name}' ({info['total_files']} files, {info['formatted_size']}).",
-                    deleted_path=str(target),
-                    **info,
-                )
-            else:
-                target.unlink()
-                return ToolResult.ok(
-                    f"Successfully deleted file '{target.name}' ({info['formatted_size']}).",
-                    deleted_path=str(target),
-                    **info,
-                )
+            moved_to_recycle_bin = False
+            try:
+                import importlib
+
+                s2t: Any = importlib.import_module("send2trash")
+                s2t.send2trash(str(target))
+                moved_to_recycle_bin = True
+            except Exception:
+                import platform
+
+                if platform.system() == "Windows":
+                    try:
+                        import subprocess
+
+                        escaped_p = str(target).replace("'", "''")
+                        action_type = "DeleteDirectory" if target.is_dir() else "DeleteFile"
+                        ps_cmd = (
+                            f"Add-Type -AssemblyName Microsoft.VisualBasic; "
+                            f"[Microsoft.VisualBasic.FileIO.FileSystem]::{action_type}('{escaped_p}', 'OnlyErrorDialogs', 'SendToRecycleBin')"
+                        )
+                        res = subprocess.run(
+                            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                            capture_output=True,
+                            timeout=10,
+                        )
+                        if res.returncode == 0 and not target.exists():
+                            moved_to_recycle_bin = True
+                    except Exception:
+                        pass
+
+            if not moved_to_recycle_bin:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+
+            bin_status = "moved to Windows Recycle Bin" if moved_to_recycle_bin else "permanently deleted"
+            target_type = "folder" if info.get("is_dir") else "file"
+            return ToolResult.ok(
+                f"Successfully {bin_status}: {target_type} '{target.name}' ({info.get('formatted_size')}).",
+                deleted_path=str(target),
+                recycled=moved_to_recycle_bin,
+                **info,
+            )
         except Exception as e:
             return ToolResult.fail(f"Failed to delete '{target}': {e}")
 

@@ -63,6 +63,15 @@ class MessageSchema(BaseModel):
     role: str
     content: str
     timestamp: datetime
+    model_used: str | None = None
+    latency_ms: int | None = None
+    tool_calls: list[ToolCallInfo] = Field(default_factory=list)
+
+
+class MessageEditRequest(BaseModel):
+    """Request body for editing an existing message in a conversation."""
+
+    content: str = Field(..., min_length=1, description="The updated text content of the message.")
 
 
 class ConversationSummary(BaseModel):

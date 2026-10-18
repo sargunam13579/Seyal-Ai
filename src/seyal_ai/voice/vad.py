@@ -9,6 +9,7 @@ energy-based detector if Silero is unavailable.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
@@ -55,9 +56,10 @@ class VoiceActivityDetector:
         self,
         sample_rate: int = 16000,
         threshold: float = 0.5,
-        silence_threshold_ms: int = 1800,
+        silence_threshold_ms: int = 150,
         min_speech_ms: int = 250,
         energy_threshold: int = 100,
+        on_speech_start: Callable[[], None] | None = None,
     ) -> None:
         """
         Args:
@@ -82,10 +84,14 @@ class VoiceActivityDetector:
         self._preroll_chunks: deque[np.ndarray] = deque(maxlen=4)  # ~128ms pre-speech buffer
         self._speech_start_time: float | None = None
         self._last_speech_time: float | None = None
+        self._accumulated_speech_ms: float = 0.0
+        self._accumulated_silence_ms: float = 0.0
 
         self._silero_model = None
         self._use_silero = False
         self._event_bus = get_event_bus()
+        self._on_speech_start = on_speech_start
+        self._pending_callback = False
 
         self._load_vad_model()
 
@@ -150,7 +156,7 @@ class VoiceActivityDetector:
             log.debug("Silero VAD error: %s", e)
             return 0.0
 
-    def process_chunk(self, chunk: np.ndarray) -> VADState:
+    def process_chunk(self, chunk: np.ndarray, is_assistant_speaking: bool = False) -> VADState:
         """
         Process an audio chunk and return the current VAD state with hysteresis.
 
@@ -161,7 +167,16 @@ class VoiceActivityDetector:
             Current VAD state (IDLE, SPEECH, or SILENCE).
         """
         now = time.time()
+        chunk_ms = (len(chunk) / self._sample_rate) * 1000.0 if self._sample_rate > 0 else 0.0
         energy = self._compute_energy(chunk)
+
+        # If assistant was speaking and now stopped, fire any pending callback
+        if self._pending_callback and not is_assistant_speaking and self._on_speech_start:
+            try:
+                self._on_speech_start()
+            except Exception as e:
+                log.debug("on_speech_start callback error: %s", e)
+            self._pending_callback = False
 
         # Dynamic Hysteresis:
         # If already speaking, use sustain threshold (prevents soft consonants like 'p', 'k', 'th' from cutting off)
@@ -179,15 +194,27 @@ class VoiceActivityDetector:
 
         if is_speech:
             self._last_speech_time = now
+            self._accumulated_silence_ms = 0.0
 
             if self._state != VADState.SPEECH:
                 # Transition from IDLE to SPEECH
                 self._state = VADState.SPEECH
                 self._speech_start_time = now
+                self._accumulated_speech_ms = chunk_ms
+                if not is_assistant_speaking and self._on_speech_start:
+                    try:
+                        self._on_speech_start()
+                    except Exception as e:
+                        log.debug("on_speech_start callback error: %s", e)
+                elif is_assistant_speaking and self._on_speech_start:
+                    # Defer callback until assistant stops speaking
+                    self._pending_callback = True
                 # Include pre-roll buffer so the very beginning consonant is preserved
                 self._speech_chunks = list(self._preroll_chunks)
                 self._preroll_chunks.clear()
                 log.debug("VAD: Speech started (energy=%.0f)", energy)
+            else:
+                self._accumulated_speech_ms += chunk_ms
 
             self._speech_chunks.append(chunk.copy())
             return VADState.SPEECH
@@ -196,27 +223,44 @@ class VoiceActivityDetector:
             if self._state == VADState.SPEECH:
                 # Still accumulate silence chunks during natural conversational pauses
                 self._speech_chunks.append(chunk.copy())
+                self._accumulated_silence_ms += chunk_ms
 
                 # Check if silence has lasted long enough to conclude utterance
+                silence_duration_ms = self._accumulated_silence_ms
                 if self._last_speech_time is not None:
-                    silence_duration_ms = (now - self._last_speech_time) * 1000
-                    if (
-                        silence_duration_ms >= self._silence_threshold_ms
-                        and self._speech_start_time is not None
-                    ):
-                        speech_duration_ms = (now - self._speech_start_time) * 1000
-                        if speech_duration_ms >= self._min_speech_ms:
-                            self._state = VADState.SILENCE
-                            log.debug(
-                                "VAD: Speech ended (duration=%.0fms)",
-                                speech_duration_ms,
-                            )
-                            return VADState.SILENCE
-                        else:
-                            # Too short, discard click/bump
-                            self._state = VADState.IDLE
-                            self._speech_chunks = []
-                            return VADState.IDLE
+                    silence_duration_ms = max(
+                        self._accumulated_silence_ms,
+                        (now - self._last_speech_time) * 1000.0,
+                    )
+
+                if silence_duration_ms >= self._silence_threshold_ms:
+                    speech_duration_ms = self._accumulated_speech_ms
+                    if self._speech_start_time is not None:
+                        speech_duration_ms = max(
+                            self._accumulated_speech_ms,
+                            (now - self._speech_start_time) * 1000.0,
+                        )
+
+                    if speech_duration_ms >= self._min_speech_ms:
+                        self._state = VADState.SILENCE
+                        log.debug(
+                            "VAD: Speech ended (duration=%.0fms)",
+                            speech_duration_ms,
+                        )
+                        # Reset to IDLE for next utterance detection
+                        self._state = VADState.IDLE
+                        self._speech_start_time = None
+                        self._accumulated_speech_ms = 0.0
+                        self._accumulated_silence_ms = 0.0
+                        return VADState.SILENCE
+                    else:
+                        # Too short, discard click/bump
+                        self._state = VADState.IDLE
+                        self._speech_chunks = []
+                        self._speech_start_time = None
+                        self._accumulated_speech_ms = 0.0
+                        self._accumulated_silence_ms = 0.0
+                        return VADState.IDLE
 
                 return VADState.SPEECH  # Still in speech, waiting for natural silence boundary
 
@@ -238,6 +282,8 @@ class VoiceActivityDetector:
         self._speech_chunks = []
         self._state = VADState.IDLE
         self._speech_start_time = None
+        self._accumulated_speech_ms = 0.0
+        self._accumulated_silence_ms = 0.0
         return segment
 
     def reset(self) -> None:
@@ -248,6 +294,8 @@ class VoiceActivityDetector:
         self._speech_chunks = []
         self._speech_start_time = None
         self._last_speech_time = None
+        self._accumulated_speech_ms = 0.0
+        self._accumulated_silence_ms = 0.0
 
         # Reset Silero model state if loaded
         if self._silero_model is not None:

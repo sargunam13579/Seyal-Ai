@@ -1037,3 +1037,251 @@ class TestVoiceModuleImports:
         assert VoiceSynthesizeRequest is not None
         assert VoiceSynthesizeResponse is not None
         assert VoiceTranscribeResponse is not None
+
+
+# ---------------------------------------------------------------------------
+# Wake-Word Detection System Tests (Phase 3 & Multilingual Routing)
+# ---------------------------------------------------------------------------
+
+
+class TestWakeWordSystem:
+    """Verifies Seyal AI wake-word detection, prefixes, aliases, and command separation."""
+
+    def test_wake_word_direct_and_prefixed_trigger(self):
+        from seyal_ai.voice.wake_word import WakeWordDetector
+
+        detector = WakeWordDetector(wake_words=["Seyal AI", "Seyal"])
+
+        # Direct trigger with command
+        match1 = detector.detect("Seyal AI, open Chrome")
+        assert match1.matched
+        assert match1.wake_word == "Seyal AI"
+        assert match1.command == "open Chrome"
+        assert match1.prefix is None
+
+        # Prefixed trigger (Hey Seyal)
+        match2 = detector.detect("Hey Seyal, what is the weather today?")
+        assert match2.matched
+        assert match2.wake_word == "Seyal"
+        assert match2.prefix == "hey"
+        assert match2.command == "what is the weather today"
+
+        # Prefixed trigger with OK
+        match3 = detector.detect("OK Seyal, take a screenshot")
+        assert match3.matched
+        assert match3.wake_word == "Seyal"
+        assert match3.prefix == "ok"
+        assert match3.command == "take a screenshot"
+
+        # Standalone wake word (no command)
+        match4 = detector.detect("Hey Seyal!")
+        assert match4.matched
+        assert not match4.has_command
+        assert match4.command == ""
+
+    def test_wake_word_trailing_trigger(self):
+        from seyal_ai.voice.wake_word import WakeWordDetector
+
+        detector = WakeWordDetector(wake_words=["Seyal AI", "Seyal"])
+
+        # Trailing trigger with command first
+        match = detector.detect("Play Tamil melody songs on YouTube, Seyal AI")
+        assert match.matched
+        assert match.wake_word == "Seyal AI"
+        assert match.command == "Play Tamil melody songs on YouTube"
+
+    def test_wake_word_dynamic_aliases_and_reconfiguration(self):
+        from seyal_ai.voice.wake_word import WakeWordDetector
+
+        detector = WakeWordDetector(wake_words=["Seyal AI"])
+
+        # Update with aliases
+        detector.update_wake_words("Seyal Pro", ["Seyal Assistant", "Seyal Mini"])
+        assert "Seyal Pro" in detector.wake_words
+        assert "Seyal Assistant" in detector.wake_words
+
+        match = detector.detect("Hello Seyal Pro, run diagnostic test")
+        assert match.matched
+        assert match.wake_word == "Seyal Pro"
+        assert match.prefix == "hello"
+        assert match.command == "run diagnostic test"
+
+        # Old unlisted wake word should not match
+        old_match = detector.detect("Hey UnknownBot, do something")
+        assert not old_match.matched
+
+    def test_wake_word_negative_unmatched_and_empty(self):
+        from seyal_ai.voice.wake_word import WakeWordDetector
+
+        detector = WakeWordDetector(wake_words=["Seyal AI", "Seyal"])
+
+        # Empty string
+        empty_match = detector.detect("   ")
+        assert not empty_match.matched
+        assert not empty_match.has_command
+
+        # Regular conversation without wake word
+        conv_match = detector.detect("Good morning everyone in the room")
+        assert not conv_match.matched
+        assert conv_match.raw_text == "Good morning everyone in the room"
+
+        # Helper method extract_command_or_original
+        matched, text = detector.extract_command_or_original("Good morning everyone")
+        assert not matched
+        assert text == "Good morning everyone"
+
+        matched2, cmd2 = detector.extract_command_or_original("Hey Seyal, turn on lights")
+        assert matched2
+        assert cmd2 == "turn on lights"
+
+
+# ---------------------------------------------------------------------------
+# Multilingual Voice Architecture Tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultilingualVoiceArchitecture:
+    """Verifies Language Routing, Subtitle Sanitization, Neural TTS resolution, and Barge-In."""
+
+    def test_voice_language_detector_multilingual_routing(self):
+        from seyal_ai.voice.stt import detect_text_language
+
+        # Tamil script
+        assert detect_text_language("வணக்கம் Seyal AI, எப்டி இருக்கீங்க?") == "ta"
+
+        # Devanagari Hindi
+        assert detect_text_language("नमस्ते, आज का मौसम कैसा है?") == "hi"
+
+        # Tanglish markers
+        assert detect_text_language("Seyal, chrome browser ah open pannu") == "tanglish"
+        assert detect_text_language("naa solra file ah delete pannitanga") == "tanglish"
+        assert detect_text_language("inniki meeting epdi irukku?") == "tanglish"
+
+        # Hindi Latin markers
+        assert detect_text_language("mujhe naya folder kholo") == "hi"
+
+        # Standard English
+        assert detect_text_language("Seyal AI, please open the project directory") == "en"
+
+        # Empty string fallback
+        assert detect_text_language("") == "en"
+
+    def test_voice_stt_transcription_sanitization(self):
+        from seyal_ai.voice.stt import sanitize_transcribed_text
+
+        # Strip markdown backticks and JSON wrapper
+        raw_json = '```json\n{"text": "செயல் AI கோப்பை திற"}\n```'
+        assert sanitize_transcribed_text(raw_json) == "செயல் AI கோப்பை திற"
+
+        # Strip acoustic timestamps
+        assert sanitize_transcribed_text("00:00") == ""
+        assert sanitize_transcribed_text("[01:23.456]") == ""
+
+        # Discard subtitle / Whisper / Gemini watermarks
+        assert sanitize_transcribed_text("Subtitles by Amara.org") == ""
+        assert sanitize_transcribed_text("Thank you for watching the video") == ""
+        assert sanitize_transcribed_text("Closed captions by community") == ""
+
+        # Clean user speech untouched
+        assert sanitize_transcribed_text("Hey Seyal, create backup.zip") == "Hey Seyal, create backup.zip"
+
+    def test_voice_multilingual_neural_voice_resolution(self):
+        from seyal_ai.voice.tts import resolve_multilingual_voice
+
+        # Pure Tamil text auto-routes to Tamil Neural Voice
+        tamil_female = resolve_multilingual_voice("கோப்பு வெற்றிகரமாக சேமிக்கப்பட்டது", requested_voice="auto")
+        assert tamil_female == "ta-IN-PallaviNeural"
+
+        # Tamil text with male preference
+        tamil_male = resolve_multilingual_voice("கோப்பு உருவாக்கப்பட்டது", requested_voice="male")
+        assert tamil_male == "ta-IN-ValluvarNeural"
+
+        # Standard English / neutral auto-routes to Ava Multilingual
+        english_voice = resolve_multilingual_voice("File saved successfully", requested_voice="auto")
+        assert english_voice == "en-US-AvaMultilingualNeural"
+
+        # Explicit voice preserved
+        custom_voice = resolve_multilingual_voice("Welcome back", requested_voice="en-GB-SoniaNeural")
+        assert custom_voice == "en-GB-SoniaNeural"
+
+    def test_voice_sentence_splitting_and_micro_fragment_merging(self):
+        from seyal_ai.voice.tts import _split_sentences
+
+        text = "Hello there! Welcome to Seyal AI. We are ready to assist you. OK?"
+        chunks = _split_sentences(text)
+
+        assert len(chunks) >= 3
+        assert "Hello there!" in chunks[0]
+        assert any("Welcome to Seyal AI." in c for c in chunks)
+
+        # Micro fragments (<10 chars) are merged to previous sentence
+        text_with_fragment = "Task finished successfully. Yes sir."
+        chunks_merged = _split_sentences(text_with_fragment)
+        assert len(chunks_merged) == 1
+        assert "Task finished successfully. Yes sir." in chunks_merged[0]
+
+    @pytest.mark.asyncio
+    async def test_voice_tts_interruptible_synthesis_bargein(self):
+        from seyal_ai.voice.tts import TTSEngine
+
+        engine = TTSEngine(provider_name="pyttsx3")
+
+        async def mock_synth(text: str) -> bytes:
+            return b"MOCK_AUDIO_CHUNK"
+
+        engine.synthesize = AsyncMock(side_effect=mock_synth)
+
+        # Pre-set stop request to simulate immediate user barge-in
+        engine.request_stop()
+        assert engine._stop_requested
+
+        chunks = await engine.synthesize_sentences("Sentence one. Sentence two. Sentence three.")
+        # When stopped before synthesis, no chunks processed
+        assert len(chunks) == 0
+
+        # Reset stop flag
+        engine.reset_stop()
+        assert not engine._stop_requested
+
+        chunks_after_reset = await engine.synthesize_sentences("Sentence one. Sentence two.")
+        assert len(chunks_after_reset) == 2
+
+    def test_voice_pipeline_state_callback_dispatch(self):
+        from seyal_ai.voice.pipeline import PipelineState, VoicePipeline
+
+        mock_brain = MagicMock()
+        mock_brain.identity = None
+        mock_brain._settings = MagicMock()
+        mock_brain._settings.voice.sample_rate = 16000
+        mock_brain._settings.voice.stt_provider = "google_web"
+        mock_brain._settings.voice.tts_provider = "edge"
+        mock_brain._settings.voice.tts.voice = "en-US-JennyNeural"
+        mock_brain._settings.voice.tts.speed = 1.0
+        mock_brain._settings.voice.tts.fallback_voice = ""
+        mock_brain._settings.voice.language = "en-US"
+        mock_brain._settings.voice.silence_threshold_ms = 1500
+        mock_brain._settings.voice.vad.threshold = 0.5
+        mock_brain._settings.voice.vad.min_speech_ms = 250
+        mock_brain._settings.voice.vad.energy_threshold = 300
+        mock_brain._settings.voice.interaction_mode = "voice_and_text"
+        mock_brain._settings.voice.interrupt_enabled = True
+
+        pipeline = VoicePipeline(brain=mock_brain)
+
+        recorded_states: list[PipelineState] = []
+        pipeline.on_state_change(lambda s: recorded_states.append(s))
+
+        pipeline._set_state(PipelineState.IDLE)
+        pipeline._set_state(PipelineState.LISTENING)
+        pipeline._set_state(PipelineState.PROCESSING)
+        pipeline._set_state(PipelineState.SPEAKING)
+        pipeline._set_state(PipelineState.STOPPED)
+
+        assert recorded_states == [
+            PipelineState.IDLE,
+            PipelineState.LISTENING,
+            PipelineState.PROCESSING,
+            PipelineState.SPEAKING,
+            PipelineState.STOPPED,
+        ]
+

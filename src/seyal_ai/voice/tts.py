@@ -128,6 +128,10 @@ class TTSError(Exception):
     pass
 
 
+# In-memory synthesis cache: (paced_text, resolved_voice, speed_str) -> audio_bytes
+_edge_tts_cache: dict[tuple[str, str, str], bytes] = {}
+
+
 class EdgeTTSProvider(BaseTTSProvider):
     """
     High-quality TTS using Microsoft Edge's free speech API.
@@ -174,6 +178,11 @@ class EdgeTTSProvider(BaseTTSProvider):
         speed_pct = round((speed - 1.0) * 100)
         speed_str = f"+{speed_pct}%" if speed_pct >= 0 else f"{speed_pct}%"
 
+        # Check in-memory cache for instant 0ms synthesis
+        cache_key = (paced_text or text, resolved_voice, speed_str)
+        if cache_key in _edge_tts_cache:
+            return _edge_tts_cache[cache_key]
+
         for attempt in range(2):
             try:
                 communicate = edge_tts.Communicate(paced_text or text, resolved_voice, rate=speed_str)
@@ -194,6 +203,12 @@ class EdgeTTSProvider(BaseTTSProvider):
                     len(audio_bytes),
                     text[:50],
                 )
+                if len(_edge_tts_cache) > 256:
+                    try:
+                        _edge_tts_cache.pop(next(iter(_edge_tts_cache)))
+                    except Exception:
+                        pass
+                _edge_tts_cache[cache_key] = audio_bytes
                 return audio_bytes
 
             except TTSError:

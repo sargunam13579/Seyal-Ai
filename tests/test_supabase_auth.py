@@ -3,12 +3,11 @@ Tests for Supabase authentication and JWT verification subsystem.
 """
 
 import jwt
-import pytest
 from fastapi.testclient import TestClient
 
 from seyal_ai.api.app import create_app
 from seyal_ai.core.config import SeyalAiSettings
-from seyal_ai.security.supabase_auth import SupabaseUser, decode_supabase_jwt, verify_supabase_token
+from seyal_ai.security.supabase_auth import decode_supabase_jwt, verify_supabase_token
 
 
 def test_supabase_jwt_decoding_unverified():

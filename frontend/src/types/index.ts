@@ -39,6 +39,15 @@ export interface ToolCallInfo {
   success?: boolean;
 }
 
+export interface StepItem {
+  step: number;
+  thought: string;
+  action: string;
+  coordinates: [number | null, number | null];
+  success: boolean;
+  elapsed_seconds: number;
+}
+
 export interface MessageItem {
   id?: string;
   role: 'user' | 'assistant' | 'system';
@@ -46,6 +55,14 @@ export interface MessageItem {
   timestamp?: string;
   model_used?: string | null;
   tool_calls?: ToolCallInfo[];
+  steps?: Array<{
+    step: number;
+    thought: string;
+    action: string;
+    coordinates: [number | null, number | null];
+    success: boolean;
+    elapsed_seconds: number;
+  }>;
 }
 
 export interface ChatResponse {

@@ -319,6 +319,10 @@ async def _persist_chat_turn(
     file_names: list[str],
     response_text: str,
     brain: Any | None = None,
+    file_context: str | None = None,
+    model_used: str | None = None,
+    executed_tools: list[dict[str, Any]] | None = None,
+    latency_ms: int | None = None,
 ) -> None:
     """Non-blocking background helper to persist chat conversation and messages to Supabase database."""
     try:
@@ -371,7 +375,9 @@ async def _persist_chat_turn(
                 )
 
             database_user_content = user_message if user_message else "Analyze uploaded file."
-            if file_names:
+            if file_context:
+                database_user_content = f"{database_user_content}\n\nUploaded file content:\n{file_context}"
+            elif file_names:
                 database_user_content = f"{database_user_content}\n[Attached files: {', '.join(file_names)}]"
 
             await repo.add_message(
@@ -379,11 +385,36 @@ async def _persist_chat_turn(
                 role="user",
                 content=database_user_content,
             )
-            await repo.add_message(
+            asst_msg = await repo.add_message(
                 conversation_id=conv.id,
                 role="assistant",
                 content=response_text,
+                model_used=model_used,
+                latency_ms=latency_ms,
             )
+
+            # Persist executed tool calls and results to audit log
+            tools_to_save = executed_tools
+            if tools_to_save is None:
+                orchestrator = getattr(brain, "_orchestrator", None) if brain is not None else None
+                tools_to_save = getattr(orchestrator, "last_tool_calls", []) if orchestrator is not None else []
+
+            for t in tools_to_save:
+                try:
+                    tool_call = await repo.add_tool_call(
+                        message_id=asst_msg.id,
+                        tool_name=t.get("name", "unknown_tool"),
+                        parameters=t.get("arguments", {}) if isinstance(t.get("arguments"), dict) else {},
+                        risk_level=t.get("risk_level", "low"),
+                    )
+                    await repo.add_tool_result(
+                        tool_call_id=tool_call.id,
+                        success=t.get("success", True),
+                        result_data={"output": str(t.get("result", ""))[:2000]},
+                    )
+                except Exception as t_err:
+                    log.debug("Notice recording tool call audit: %s", t_err)
+
             await session.commit()
 
             # Trigger periodic dynamic title evaluation in background if due
@@ -527,14 +558,19 @@ async def chat(
         len(files),
     )
 
+    active_conversation_id = conversation_id or str(uuid.uuid4())
+    uploaded_filenames = [f.filename or "uploaded_file" for f in files] if files else []
+
     # ----------------------------------------------
     # AI PROCESSING
     # ----------------------------------------------
 
+    t0 = asyncio.get_event_loop().time()
     try:
         response_text = await brain.process(
             final_input,
             allow_tools=True,
+            conversation_id=active_conversation_id,
         )
 
     except Exception as error:
@@ -553,23 +589,7 @@ async def chat(
             ),
         ) from error
 
-    # ----------------------------------------------
-    # NON-BLOCKING BACKGROUND DATABASE PERSISTENCE
-    # ----------------------------------------------
-    active_conversation_id = conversation_id or str(uuid.uuid4())
-    uploaded_filenames = [f.filename or "uploaded_file" for f in files] if files else []
-
-    asyncio.create_task(
-        _persist_chat_turn(
-            target_conv_id=active_conversation_id,
-            user_message=user_message,
-            file_names=uploaded_filenames,
-            response_text=response_text,
-            brain=brain,
-        )
-    )
-
-    conversation_id = active_conversation_id
+    elapsed_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
 
     # ----------------------------------------------
     # MODEL INFORMATION
@@ -591,6 +611,31 @@ async def chat(
 
     except Exception:
         pass
+
+    # Snapshot executed tools synchronously to prevent race condition
+    current_tools: list[dict[str, Any]] = []
+    if hasattr(brain, "_orchestrator") and getattr(brain._orchestrator, "last_tool_calls", None):
+        current_tools = list(brain._orchestrator.last_tool_calls)
+
+    # ----------------------------------------------
+    # NON-BLOCKING BACKGROUND DATABASE PERSISTENCE
+    # ----------------------------------------------
+
+    asyncio.create_task(
+        _persist_chat_turn(
+            target_conv_id=active_conversation_id,
+            user_message=user_message,
+            file_names=uploaded_filenames,
+            response_text=response_text,
+            brain=brain,
+            file_context=file_context,
+            model_used=model_used,
+            executed_tools=current_tools,
+            latency_ms=elapsed_ms,
+        )
+    )
+
+    conversation_id = active_conversation_id
 
     # ----------------------------------------------
     # TOOL CALL INFORMATION
@@ -743,16 +788,43 @@ async def chat_stream(
     uploaded_filenames = [f.filename or "uploaded_file" for f in files] if files else []
 
     async def event_generator():
+        t0 = asyncio.get_event_loop().time()
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': active_conversation_id})}\n\n"
         full_chunks = []
         try:
             from seyal_ai.core.orchestrator import _requires_tools
             if _requires_tools(final_input):
-                resp = await brain.process(final_input, allow_tools=True)
-                full_chunks.append(resp)
-                yield f"data: {json.dumps({'type': 'chunk', 'text': resp})}\n\n"
+                # Provide immediate live progress indicator so user doesn't see a blank frozen screen
+                init_notice = "Working on your request...\n\n"
+                full_chunks.append(init_notice)
+                yield f"data: {json.dumps({'type': 'chunk', 'text': init_notice})}\n\n"
+
+                resp = await brain.process(
+                    final_input,
+                    allow_tools=True,
+                    conversation_id=active_conversation_id,
+                )
+                words = resp.split(" ")
+                chunk_size = 4
+                for i in range(0, len(words), chunk_size):
+                    if await request.is_disconnected():
+                        log.info("Client disconnected during tool response SSE streaming.")
+                        break
+                    chunk_text = " ".join(words[i : i + chunk_size])
+                    if i + chunk_size < len(words):
+                        chunk_text += " "
+                    full_chunks.append(chunk_text)
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk_text})}\n\n"
+                    await asyncio.sleep(0.005)
             else:
-                async for chunk in brain.process_stream(final_input, allow_tools=True):
+                async for chunk in brain.process_stream(
+                    final_input,
+                    allow_tools=False,
+                    conversation_id=active_conversation_id,
+                ):
+                    if await request.is_disconnected():
+                        log.info("Client disconnected during stream SSE streaming.")
+                        break
                     full_chunks.append(chunk)
                     yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
         except Exception as e:
@@ -761,8 +833,21 @@ async def chat_stream(
             full_chunks.append(fallback)
             yield f"data: {json.dumps({'type': 'chunk', 'text': fallback})}\n\n"
 
+        elapsed_ms = int((asyncio.get_event_loop().time() - t0) * 1000)
         response_text = "".join(full_chunks)
         yield f"data: {json.dumps({'type': 'done', 'conversation_id': active_conversation_id, 'full_response': response_text})}\n\n"
+
+        # Model and tool call information snapshot
+        model_used = None
+        try:
+            tier = brain._classify_tier(final_input)
+            _, model_used = brain._router._resolve_provider_and_model(tier)
+        except Exception:
+            pass
+
+        current_tools: list[dict[str, Any]] = []
+        if hasattr(brain, "_orchestrator") and getattr(brain._orchestrator, "last_tool_calls", None):
+            current_tools = list(brain._orchestrator.last_tool_calls)
 
         # Background persistence & title service
         asyncio.create_task(
@@ -772,6 +857,10 @@ async def chat_stream(
                 file_names=uploaded_filenames,
                 response_text=response_text,
                 brain=brain,
+                file_context=file_context,
+                model_used=model_used,
+                executed_tools=current_tools,
+                latency_ms=elapsed_ms,
             )
         )
 
@@ -797,16 +886,18 @@ async def chat_stream(
 )
 async def reset_chat(
     request: Request,
+    conversation_id: str | None = None,
 ) -> ChatResetResponse:
     """Reset the conversation context."""
 
     brain = request.app.state.brain
 
     if brain.is_initialized:
-        brain.reset_conversation()
+        brain.reset_conversation(conversation_id)
 
     log.info(
-        "Conversation reset via API"
+        "Conversation reset via API (conversation_id=%s)",
+        conversation_id,
     )
 
     return ChatResetResponse(

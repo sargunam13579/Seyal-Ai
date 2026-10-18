@@ -67,12 +67,46 @@ class TestToolRegistry:
             assert schema.description
             assert schema.parameters
 
-    def test_tool_names(self, tool_registry: ToolRegistry, starter_tools):
+    def test_list_tools_by_multiple_categories(self, tool_registry: ToolRegistry, starter_tools):
         tool_registry.register_many(starter_tools)
-        names = tool_registry.tool_names
-        assert "get_current_time" in names
-        assert "get_system_info" in names
-        assert "open_application" in names
+        matched = tool_registry.list_tools(categories={"system", "application"})
+        assert len(matched) >= 3
+        assert any(t.category == "system" for t in matched)
+        assert any(t.category == "application" for t in matched)
+
+    def test_get_schemas_by_multiple_categories(self, tool_registry: ToolRegistry, starter_tools):
+        tool_registry.register_many(starter_tools)
+        schemas = tool_registry.get_schemas(categories={"system"})
+        assert len(schemas) >= 2
+        for s in schemas:
+            tool = tool_registry.get_or_raise(s.name)
+            assert tool.category == "system"
+
+    def test_resolve_relevant_categories_and_fast_path(self):
+        from seyal_ai.core.orchestrator import _requires_tools, resolve_relevant_categories
+
+        # Conversational questions -> Fast Path (No tools)
+        assert not _requires_tools("What is artificial intelligence?")
+        assert not _requires_tools("reply en romba slow ah varuthu?")
+        assert not _requires_tools("explain python file system architecture")
+        assert resolve_relevant_categories("What is artificial intelligence?") is None
+
+        # Direct action commands -> Match proper category
+        assert _requires_tools("volume set to 50")
+        vol_cats = resolve_relevant_categories("volume set to 50")
+        assert vol_cats is not None and "system" in vol_cats
+
+        assert _requires_tools("take screenshot of my screen")
+        screen_cats = resolve_relevant_categories("take screenshot of my screen")
+        assert screen_cats is not None and ("vision" in screen_cats or "system" in screen_cats)
+
+        assert _requires_tools("google search latest AI news")
+        browser_cats = resolve_relevant_categories("google search latest AI news")
+        assert browser_cats is not None and "browser" in browser_cats
+
+        assert _requires_tools("delete file test.txt")
+        file_cats = resolve_relevant_categories("delete file test.txt")
+        assert file_cats is not None and "files" in file_cats
 
 
 # ---------------------------------------------------------------------------

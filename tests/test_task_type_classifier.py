@@ -8,8 +8,10 @@ Verifies:
 Zero hardcoding of specific personal or user example strings.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from seyal_ai.llm.providers.base import LLMResponse
 from seyal_ai.planning.task_classifier import TaskSemanticClassifier
 from seyal_ai.planning.task_types import TaskIntentType, TaskPermissionState, TaskType

@@ -16,14 +16,14 @@ import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import type { ConversationSummary } from '../../types';
-import { LoginPage } from '../auth/LoginPage';
-import { EditProfileModal, HelpModal, UserAccountMenu } from '../profile';
-import {
-  SidebarTaskItem,
-  SidebarFooter,
-  TaskContextMenu,
-  TaskDetailsModal,
-} from './sidebar/index';
+import { UserAccountMenu } from '../profile/UserAccountMenu';
+const LoginPage = React.lazy(() => import('../auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const EditProfileModal = React.lazy(() => import('../profile/EditProfileModal').then(m => ({ default: m.EditProfileModal })));
+const HelpModal = React.lazy(() => import('../profile/HelpModal').then(m => ({ default: m.HelpModal })));
+const TaskDetailsModal = React.lazy(() => import('./sidebar/TaskDetailsModal').then(m => ({ default: m.TaskDetailsModal })));
+import { SidebarTaskItem } from './sidebar/SidebarTaskItem';
+import { SidebarFooter } from './sidebar/SidebarFooter';
+import { TaskContextMenu } from './sidebar/TaskContextMenu';
 
 interface ConvoAgentSidebarProps {
   onSelectPrompt?: (promptText: string) => void;
@@ -82,6 +82,10 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     setIsConvoSidebarCollapsed,
     openSettingsTab,
     setUserProfileAvatar,
+    conversations,
+    setConversations,
+    pinnedConversationIds: pinnedIds,
+    setPinnedConversationIds: setPinnedIds,
   } = useSeyalAi();
 
   const { signOut, user } = useAuth();
@@ -116,23 +120,7 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     }
   }, [isComputerUseActive, activeView]);
 
-  // Stale-while-revalidate: seed state from localStorage cache immediately (zero wait)
-  const [conversations, setConversations] = useState<ConversationSummary[]>(() => {
-    try {
-      const cached = localStorage.getItem(CONV_CACHE_KEY);
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
-  });
-  const [pinnedIds, setPinnedIds] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(PINNED_STORAGE_KEY) || localStorage.getItem('seyal_pinned_conversation_ids');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
+
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearchInput, setShowSearchInput] = useState(false);
@@ -179,34 +167,149 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     description?: string;
   } | null>(null);
 
+  const PAGE_SIZE = 25;
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [searchResults, setSearchResults] = useState<ConversationSummary[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
   const menuRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
-  const loadConversations = async () => {
+  const loadConversations = async (resetPage = true) => {
     try {
-      // Unlimited: fetches all conversation history without a 50-item cap
-      const res = await api.listConversations(1, 0);
+      const res = await api.listConversations(1, PAGE_SIZE);
       const convs = res.conversations || [];
-      setConversations(convs);
-      // Update localStorage cache so next app-open is instant
+      if (resetPage) {
+        setConversations(convs);
+        setPage(1);
+      } else {
+        setConversations((prev) => {
+          const map = new Map<string, ConversationSummary>();
+          convs.forEach((c) => map.set(c.id, c));
+          prev.forEach((c) => {
+            if (!map.has(c.id)) map.set(c.id, c);
+          });
+          return Array.from(map.values());
+        });
+      }
+      setHasMore(convs.length < res.total);
       try { localStorage.setItem(CONV_CACHE_KEY, JSON.stringify(convs)); } catch { /* quota */ }
     } catch (err) {
       console.debug('Failed to load agent task conversations:', err);
     }
   };
 
-  // Load once on mount (cache already shown), refresh when active conversation changes or conversationsVersion updates
+  const loadMoreConversations = async () => {
+    if (isLoadingMore || !hasMore || searchResults !== null) return;
+    setIsLoadingMore(true);
+    try {
+      const nextPage = page + 1;
+      const res = await api.listConversations(nextPage, PAGE_SIZE);
+      const newConvs = res.conversations || [];
+      if (newConvs.length === 0) {
+        setHasMore(false);
+      } else {
+        setConversations((prev) => {
+          const map = new Map<string, ConversationSummary>();
+          prev.forEach((c) => map.set(c.id, c));
+          newConvs.forEach((c) => map.set(c.id, c));
+          const combined = Array.from(map.values());
+          if (res.total && combined.length >= res.total) {
+            setHasMore(false);
+          }
+          return combined;
+        });
+        setPage(nextPage);
+      }
+    } catch (err) {
+      console.debug('Failed to load more conversations:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  // Debounced Server-Side Search (searches titles and full message contents)
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.listConversations(1, 50, trimmed);
+        setSearchResults(res.conversations || []);
+      } catch (err) {
+        console.debug('Server search fallback to local filter:', err);
+        const localMatches = conversations.filter((c) =>
+          (c.summary || '').toLowerCase().includes(trimmed.toLowerCase())
+        );
+        setSearchResults(localMatches);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, conversations]);
+
+  // Infinite Scroll event listener
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      if (searchResults !== null) return;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      if (nearBottom && hasMore && !isLoadingMore) {
+        loadMoreConversations();
+      }
+    };
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [hasMore, isLoadingMore, page, searchResults]);
+
+  // Load once on mount, refresh when active conversation changes or conversationsVersion updates
   useEffect(() => {
     loadConversations();
   }, [activeConversationId, conversationsVersion]);
 
-  // Periodic refresh while active conversation exists to catch dynamic AI title updates
+  // Periodic refresh while active conversation exists (pauses when window is minimized)
   useEffect(() => {
     if (!activeConversationId) return;
-    const interval = setInterval(() => {
-      loadConversations();
-    }, 3000);
-    return () => clearInterval(interval);
+    let interval: any = null;
+
+    const startInterval = () => {
+      if (interval) clearInterval(interval);
+      if (!document.hidden) {
+        interval = setInterval(() => {
+          loadConversations(false);
+        }, 4000);
+      }
+    };
+
+    startInterval();
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (interval) clearInterval(interval);
+      } else {
+        loadConversations(false);
+        startInterval();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [activeConversationId]);
 
   // Save pinned IDs to localStorage
@@ -428,8 +531,11 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
       if (detail && detail.messages) {
         setMessages(
           detail.messages.map((m) => ({
+            id: m.id,
             role: m.role as 'user' | 'assistant',
             content: m.content,
+            model_used: m.model_used,
+            tool_calls: m.tool_calls,
             timestamp: m.timestamp
               ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
               : undefined,
@@ -551,8 +657,8 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     }
   };
 
-  // Show all conversation history in the sidebar
-  const agentConversations = conversations;
+  // Show all conversation history or server search results
+  const agentConversations = searchResults !== null ? searchResults : conversations;
 
   // Sort conversations: Pinned first, then by date
   const sortedConversations = [...agentConversations].sort((a, b) => {
@@ -563,10 +669,7 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  const filteredConversations = sortedConversations.filter((c) => {
-    const displayTitle = (c.summary || 'Agent task').replace(/^\[Computer-Use\]\s*/i, '');
-    return displayTitle.toLowerCase().includes(searchQuery.toLowerCase());
-  });
+  const filteredConversations = sortedConversations;
 
   const top10Ids = filteredConversations.slice(0, 10).map((c) => c.id);
   const isMaxSelected = selectedConvIds.length >= 10;
@@ -938,10 +1041,16 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
           <div className="text-center py-14 px-3 mx-1 border border-dashed border-slate-800/80 rounded-2xl">
             <MessageSquare className="w-6 h-6 text-slate-700 mx-auto mb-2" />
             <p className="text-slate-500 text-xs font-medium">
-              No agent tasks yet.
+              {isSearching
+                ? 'Searching conversations...'
+                : searchResults !== null
+                ? `No tasks matching "${searchQuery}"`
+                : 'No agent tasks yet.'}
             </p>
             <p className="text-slate-600 text-[10px] mt-1">
-              Start a computer-use task to see history.
+              {searchResults !== null
+                ? 'Try searching with different keywords.'
+                : 'Start a computer-use task to see history.'}
             </p>
           </div>
         ) : (
@@ -970,6 +1079,22 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
               infoModalOpen={!!infoModalConv}
             />
           ))
+        )}
+
+        {/* Searching database feedback */}
+        {isSearching && (
+          <div className="flex items-center justify-center py-3 text-cyan-400 gap-2 text-xs font-mono animate-fadeIn">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span>Searching database...</span>
+          </div>
+        )}
+
+        {/* Infinite scroll loading more indicator */}
+        {isLoadingMore && (
+          <div className="flex items-center justify-center py-3 text-cyan-400/80 gap-2 text-xs font-mono animate-fadeIn">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span>Loading older tasks...</span>
+          </div>
         )}
       </div>
 
@@ -1017,80 +1142,82 @@ export const ConvoAgentSidebar: React.FC<ConvoAgentSidebarProps> = () => {
         />
       )}
 
-      {/* Task Info Modal rendered via Portal into #convo-chat-area */}
-      {isComputerUseActive && activeView === 'assistant' && (
-        <TaskDetailsModal
-          isOpen={!!infoModalConv}
-          conv={infoModalConv}
-          onClose={() => {
-            setInfoModalConv(null);
-            setCopiedId(false);
-            setCopiedDesc(false);
-          }}
-          isPinned={infoModalConv ? pinnedIds.includes(infoModalConv.id) : false}
-          infoDetail={infoDetail}
-          renameHistory={infoModalConv ? getRenameHistory(infoModalConv.id) : []}
-          formatDateTime={formatDateTime}
-          copiedId={copiedId}
-          copiedDesc={copiedDesc}
-          onCopyId={(id: string) => {
-            navigator.clipboard?.writeText(id);
-            setCopiedId(true);
-            setTimeout(() => setCopiedId(false), 2000);
-          }}
-          onCopyDesc={(desc: string) => {
-            navigator.clipboard?.writeText(desc);
-            setCopiedDesc(true);
-            setTimeout(() => setCopiedDesc(false), 2000);
-          }}
-        />
-      )}
+      <React.Suspense fallback={null}>
+        {/* Task Info Modal rendered via Portal into #convo-chat-area */}
+        {isComputerUseActive && activeView === 'assistant' && (
+          <TaskDetailsModal
+            isOpen={!!infoModalConv}
+            conv={infoModalConv}
+            onClose={() => {
+              setInfoModalConv(null);
+              setCopiedId(false);
+              setCopiedDesc(false);
+            }}
+            isPinned={infoModalConv ? pinnedIds.includes(infoModalConv.id) : false}
+            infoDetail={infoDetail}
+            renameHistory={infoModalConv ? getRenameHistory(infoModalConv.id) : []}
+            formatDateTime={formatDateTime}
+            copiedId={copiedId}
+            copiedDesc={copiedDesc}
+            onCopyId={(id: string) => {
+              navigator.clipboard?.writeText(id);
+              setCopiedId(true);
+              setTimeout(() => setCopiedId(false), 2000);
+            }}
+            onCopyDesc={(desc: string) => {
+              navigator.clipboard?.writeText(desc);
+              setCopiedDesc(true);
+              setTimeout(() => setCopiedDesc(false), 2000);
+            }}
+          />
+        )}
 
-      {/* ChatGPT-style Deletion Toast Notification (Top Center, 2.5s Auto-dismiss) */}
-      {deleteToast &&
-        createPortal(
-          <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[999999] pointer-events-none animate-fadeIn">
-            <div
-              className={`flex items-center gap-3 px-5 py-2.5 rounded-2xl border-2 backdrop-blur-2xl shadow-2xl transition-all ${
-                deleteToast.isError
-                  ? 'bg-rose-950/95 border-rose-500 text-white shadow-[0_8px_30px_rgba(244,63,94,0.45)] ring-2 ring-rose-500/40'
-                  : 'bg-[#0b1b36] border-cyan-400 text-white shadow-[0_8px_30px_rgba(0,240,255,0.45)] ring-2 ring-cyan-400/40'
-              }`}
-            >
+        {/* ChatGPT-style Deletion Toast Notification (Top Center, 2.5s Auto-dismiss) */}
+        {deleteToast &&
+          createPortal(
+            <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[999999] pointer-events-none animate-fadeIn">
               <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+                className={`flex items-center gap-3 px-5 py-2.5 rounded-2xl border-2 backdrop-blur-2xl shadow-2xl transition-all ${
                   deleteToast.isError
-                    ? 'bg-rose-500 text-white shadow-rose-500/50'
-                    : 'bg-cyan-400 text-slate-950 shadow-cyan-400/50'
+                    ? 'bg-rose-950/95 border-rose-500 text-white shadow-[0_8px_30px_rgba(244,63,94,0.45)] ring-2 ring-rose-500/40'
+                    : 'bg-[#0b1b36] border-cyan-400 text-white shadow-[0_8px_30px_rgba(0,240,255,0.45)] ring-2 ring-cyan-400/40'
                 }`}
               >
-                {deleteToast.isError ? (
-                  <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />
-                ) : (
-                  <Check className="w-3.5 h-3.5 stroke-[3]" />
-                )}
+                <div
+                  className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+                    deleteToast.isError
+                      ? 'bg-rose-500 text-white shadow-rose-500/50'
+                      : 'bg-cyan-400 text-slate-950 shadow-cyan-400/50'
+                  }`}
+                >
+                  {deleteToast.isError ? (
+                    <AlertCircle className="w-3.5 h-3.5 stroke-[2.5]" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 stroke-[3]" />
+                  )}
+                </div>
+                <span className="text-sm font-bold text-white tracking-wide drop-shadow-md">
+                  {deleteToast.message}
+                </span>
               </div>
-              <span className="text-sm font-bold text-white tracking-wide drop-shadow-md">
-                {deleteToast.message}
-              </span>
-            </div>
-          </div>,
-          document.body
-        )}
-      <EditProfileModal
-        isOpen={isEditProfileOpen}
-        onClose={() => setIsEditProfileOpen(false)}
-        currentDisplayName={customDisplayName}
-        currentUsername={customUsername}
-        currentAvatarImage={avatarImage}
-        getInitials={getInitials}
-        onSave={handleSaveProfile}
-      />
-      <HelpModal
-        isOpen={isHelpModalOpen}
-        onClose={() => setIsHelpModalOpen(false)}
-      />
-      {renderAddAccountModal()}
+            </div>,
+            document.body
+          )}
+        <EditProfileModal
+          isOpen={isEditProfileOpen}
+          onClose={() => setIsEditProfileOpen(false)}
+          currentDisplayName={customDisplayName}
+          currentUsername={customUsername}
+          currentAvatarImage={avatarImage}
+          getInitials={getInitials}
+          onSave={handleSaveProfile}
+        />
+        <HelpModal
+          isOpen={isHelpModalOpen}
+          onClose={() => setIsHelpModalOpen(false)}
+        />
+        {renderAddAccountModal()}
+      </React.Suspense>
     </aside>
   );
 };

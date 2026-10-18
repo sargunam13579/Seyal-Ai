@@ -136,10 +136,12 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), nullable=False)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user, assistant, system, tool
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

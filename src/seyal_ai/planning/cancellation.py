@@ -37,7 +37,7 @@ class CancellationType(StrEnum):
 
 # Exact or uppercase patterns indicating emergency hard stop
 _EMERGENCY_STOP_PATTERNS = [
-    re.compile(r"^Seyal AI\s+STOP!?$", re.ASCII),
+    re.compile(r"^Seyal[-_\s]+AI\s+STOP!?$", re.ASCII),
     re.compile(r"^EMERGENCY\s+STOP!?$", re.IGNORECASE),
     re.compile(r"^KILL\s+(?:ALL|SWITCH|TASK|EXECUTION)!?$", re.IGNORECASE),
     re.compile(r"^STOP\s+EVERYTHING!?$", re.IGNORECASE),
@@ -46,9 +46,9 @@ _EMERGENCY_STOP_PATTERNS = [
 
 # Soft graceful cancellation patterns
 _GRACEFUL_STOP_PATTERNS = [
-    re.compile(r"^(?:seyal_ai\s+)?stop(?:\s+please|\s+the\s+task|\s+now)?\.?$", re.IGNORECASE),
-    re.compile(r"^(?:seyal_ai\s+)?cancel(?:\s+the\s+task|\s+this|\s+action|\s+please)?\.?$", re.IGNORECASE),
-    re.compile(r"^(?:seyal_ai\s+)?abort(?:\s+mission|\s+task|\s+operation|\s+please)?\.?$", re.IGNORECASE),
+    re.compile(r"^(?:seyal[-_\s]+ai\s+)?stop(?:\s+please|\s+the\s+task|\s+now)?\.?$", re.IGNORECASE),
+    re.compile(r"^(?:seyal[-_\s]+ai\s+)?cancel(?:\s+the\s+task|\s+this|\s+action|\s+please)?\.?$", re.IGNORECASE),
+    re.compile(r"^(?:seyal[-_\s]+ai\s+)?abort(?:\s+mission|\s+task|\s+operation|\s+please)?\.?$", re.IGNORECASE),
     re.compile(r"^(?:please\s+)?stop(?:\s+what\s+you(?:'re|\s+are)\s+doing|\s+please)?\.?$", re.IGNORECASE),
     re.compile(r"^(?:pause|hold\s+on|wait\s+stop)\.?$", re.IGNORECASE),
 ]

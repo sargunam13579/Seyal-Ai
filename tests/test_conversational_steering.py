@@ -3,7 +3,8 @@ Unit tests for Universal Real-Time Conversational Steering, Interruption & Multi
 Tests all 4 dynamic interaction cases with zero hardcoded task names.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from seyal_ai.agents.computer_use.agent import (
@@ -11,11 +12,7 @@ from seyal_ai.agents.computer_use.agent import (
     decompose_user_intents,
 )
 from seyal_ai.agents.computer_use.protocol import (
-    ActionType,
     AgentStatus,
-    ComputerAction,
-    ScreenObservation,
-    SteeringInstruction,
 )
 from seyal_ai.llm.providers.base import LLMResponse
 
@@ -49,24 +46,28 @@ async def test_case2_voice_pipelining_compound_execution():
     """Case 2: Pipelined voice narration while subsequent sub-goals initialize."""
     agent = ConversationalComputerUseAgent()
     events_emitted = []
+    original_emit = agent._event_bus.emit
 
-    async def mock_emit(event_name: str, payload: dict):
-        events_emitted.append((event_name, payload))
+    async def mock_emit(event_name: str, payload: dict | None = None, *args, **kwargs):
+        events_emitted.append((event_name, payload or {}))
 
-    agent._event_bus.emit = AsyncMock(side_effect=mock_emit)
+    try:
+        agent._event_bus.emit = AsyncMock(side_effect=mock_emit)
 
-    # Mock single goal executions
-    async def mock_exec_flow(goal: str):
-        return {"status": "completed", "narration": f"Done with {goal}", "steps_executed": 1}
+        # Mock single goal executions
+        async def mock_exec_flow(goal: str):
+            return {"status": "completed", "narration": f"Done with {goal}", "steps_executed": 1}
 
-    agent._execute_single_goal_flow = AsyncMock(side_effect=mock_exec_flow)
+        agent._execute_single_goal_flow = AsyncMock(side_effect=mock_exec_flow)
 
-    res = await agent._run_compound_goals(["Subtask 1", "Subtask 2"], original_instruction="Subtask 1 and 2")
-    assert res["status"] == "completed"
-    assert res["sub_goals_executed"] == 2
-    # Verify pipelined narration event was emitted
-    pipelined_events = [e for e in events_emitted if e[0] == "computer_use.narrate" and e[1].get("is_pipelined")]
-    assert len(pipelined_events) >= 1
+        res = await agent._run_compound_goals(["Subtask 1", "Subtask 2"], original_instruction="Subtask 1 and 2")
+        assert res["status"] == "completed"
+        assert res["sub_goals_executed"] == 2
+        # Verify pipelined narration event was emitted
+        pipelined_events = [e for e in events_emitted if e[0] == "computer_use.narrate" and e[1].get("is_pipelined")]
+        assert len(pipelined_events) >= 1
+    finally:
+        agent._event_bus.emit = original_emit
 
 
 @pytest.mark.asyncio

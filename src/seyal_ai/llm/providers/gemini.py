@@ -109,15 +109,19 @@ class GeminiProvider(BaseLLMProvider):
 
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
                     rate_limited_count += 1
-                    log.warning("[GEMINI RATE LIMIT] 429 RESOURCE_EXHAUSTED on model '%s', trying fallback...", current_model)
+                    log.warning("[GEMINI RATE LIMIT] 429 RESOURCE_EXHAUSTED on model '%s'", current_model)
+                    # Quota exhaustion is typically project-wide. If 2 models hit 429, fail fast immediately.
+                    if rate_limited_count >= 2:
+                        log.warning("[GEMINI RATE LIMIT] Project quota exhausted. Failing fast to avoid user wait stall.")
+                        break
                     continue
 
                 log.warning("Gemini model '%s' failed (%s), attempting fallback...", current_model, e)
 
         log.error("All Gemini models failed: %s", last_error)
-        if rate_limited_count == len(models_to_try):
+        if rate_limited_count >= 1:
             return LLMResponse(
-                content="⚠️ Gemini rate limit / quota exceeded on all models. Please wait a moment before sending another message.",
+                content="⚠️ Gemini rate limit / quota exceeded. Please wait a moment before sending another message or check your API key quota.",
                 finish_reason="rate_limit",
                 model=models_to_try[0] if models_to_try else "gemini-flash-lite-latest",
             )

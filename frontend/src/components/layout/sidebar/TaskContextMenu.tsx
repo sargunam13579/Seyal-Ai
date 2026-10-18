@@ -6,7 +6,9 @@ import {
   Pin,
   CheckSquare,
   Trash2,
+  Download,
 } from 'lucide-react';
+import { api } from '../../../services/api';
 import type { ConversationSummary } from '../../../types';
 
 export interface TaskContextMenuProps {
@@ -86,6 +88,33 @@ export const TaskContextMenu: React.FC<TaskContextMenuProps> = ({
       >
         <CheckSquare className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
         <span>Select</span>
+      </button>
+
+      <button
+        onClick={async (e) => {
+          e.stopPropagation();
+          onClose();
+          try {
+            const blob = await api.exportConversation(activeMenu.conv.id, 'markdown');
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const cleanTitle = (activeMenu.conv.summary || 'conversation')
+              .replace(/^\[Computer-Use\]\s*/i, '')
+              .replace(/[^a-zA-Z0-9_-]/g, '_');
+            a.download = `${cleanTitle}.md`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+          } catch (err) {
+            console.error('Failed to export conversation:', err);
+          }
+        }}
+        className="w-full px-3 py-2 rounded-xl flex items-center gap-2 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors text-left cursor-pointer"
+      >
+        <Download className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+        <span>Export</span>
       </button>
 
       <div className="border-t border-slate-800 my-1" />

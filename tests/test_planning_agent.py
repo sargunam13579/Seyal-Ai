@@ -398,7 +398,7 @@ class TestTaskManagerAndBrain:
         await brain.initialize()
 
         response = await brain.process("Seyal AI STOP")
-        assert "EMERGENCY STOP" in response
+        assert "EMERGENCY STOP" in response or "அவசர நிறுத்தம்" in response
 
 
 # ===========================================================================

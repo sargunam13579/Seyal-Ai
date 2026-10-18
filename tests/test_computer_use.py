@@ -14,7 +14,6 @@ from seyal_ai.agents.computer_use.agent import ConversationalComputerUseAgent
 from seyal_ai.agents.computer_use.grounding import VisualGroundingEngine
 from seyal_ai.agents.computer_use.protocol import (
     ActionType,
-    AgentStatus,
     ComputerAction,
     ScreenObservation,
 )
@@ -192,6 +191,23 @@ async def test_computer_use_api_routes():
         assert stop_resp.status_code == 200
         assert stop_resp.json()["status"] == "stopped"
 
+        # POST run
+        run_resp = await client.post(
+            "/api/computer-use/run",
+            json={"goal": "stop"},
+        )
+        assert run_resp.status_code == 200
+        assert run_resp.json()["status"] == "stopped"
+
+        # POST stream (prevents Microsoft Store 404 rejection)
+        stream_resp = await client.post(
+            "/api/computer-use/stream",
+            json={"goal": "stop"},
+        )
+        assert stream_resp.status_code == 200
+        assert "text/event-stream" in stream_resp.headers.get("content-type", "")
+        assert "data:" in stream_resp.text
+
         # POST direct action
         with patch("pyautogui.click", create=True):
             act_resp = await client.post(
@@ -236,7 +252,7 @@ async def test_computer_use_open_close_loop_detection():
 
     agent._classify_intent = AsyncMock(return_value="TASK")
 
-    with patch("pyautogui.hotkey", create=True), patch("subprocess.Popen", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
+    with patch("pyautogui.hotkey", create=True), patch("subprocess.Popen", create=True), patch("os.startfile", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True), patch.object(agent._executor, "_open_app", new_callable=AsyncMock, return_value={"action": "open_app", "target": "camera", "success": True}):
         res = await agent.run_goal("camera open panni close pannu")
         # Should be auto-completed by loop detection on step 3!
         assert res["status"] == "completed"
@@ -279,9 +295,11 @@ async def test_outer_task_keeps_app_open():
         if action.action_type == ActionType.WINDOW_CLOSE:
             close_calls.append(action.app_name)
             return {"action": "window_close", "success": True}
+        if action.action_type == ActionType.OPEN_APP:
+            return {"action": "open_app", "target": action.app_name, "success": True}
         return await original_exec(action)
 
-    with patch.object(agent._executor, "execute", side_effect=mock_exec), patch("pyautogui.press", create=True), patch("subprocess.Popen", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
+    with patch.object(agent._executor, "execute", side_effect=mock_exec), patch("pyautogui.press", create=True), patch("subprocess.Popen", create=True), patch("os.startfile", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
         res = await agent.run_goal("camera open panni one pic edu")
         assert res["status"] == "completed"
         # Verify that camera was NOT closed automatically (user didn't ask to close)

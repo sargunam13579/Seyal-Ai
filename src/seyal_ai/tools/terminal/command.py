@@ -132,6 +132,8 @@ class ExecuteCommandTool(BaseTool):
                     "powershell.exe",
                     "-NoProfile",
                     "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
                     "-Command",
                     cmd_clean,
                 ]
@@ -141,11 +143,18 @@ class ExecuteCommandTool(BaseTool):
         start_time = time.time()
         try:
             # Execute asynchronously with subprocess
+            import os
+            env = os.environ.copy()
+            env["CI"] = "1"  # Signals interactive CLIs to avoid hanging on interactive prompts
+            env["TERM"] = "dumb"
+
             proc = await asyncio.create_subprocess_exec(
                 *exec_cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(cwd),
+                env=env,
             )
 
             try:
@@ -154,10 +163,18 @@ class ExecuteCommandTool(BaseTool):
                     timeout=float(timeout_seconds),
                 )
             except TimeoutError:
+                # On Windows, kill entire process tree (/T) to prevent zombie child processes locking ports
+                if is_windows and proc.pid:
+                    try:
+                        import subprocess as sp
+                        sp.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False)
+                    except Exception as tk_err:
+                        log.debug("taskkill process tree cleanup notice: %s", tk_err)
                 with contextlib.suppress(ProcessLookupError):
                     proc.kill()
                 return ToolResult.fail(
-                    f"Command timed out after {timeout_seconds} seconds: '{cmd_clean}'",
+                    f"Command timed out after {timeout_seconds} seconds: '{cmd_clean}' "
+                    f"(Process tree terminated to prevent port locks. If command required interactive input, provide non-interactive flags).",
                     timed_out=True,
                     timeout_seconds=timeout_seconds,
                 )
@@ -175,17 +192,30 @@ class ExecuteCommandTool(BaseTool):
             if stderr_str:
                 formatted_output_parts.append(f"[STDERR]\n{stderr_str}")
 
-            output_text = (
+            raw_output_text = (
                 "\n".join(formatted_output_parts)
                 or f"(Command exited with code {exit_code} and no output)"
             )
+
+            # Truncate oversized command outputs to prevent LLM context window overflow
+            max_chars = 24_000
+            if len(raw_output_text) > max_chars:
+                half = max_chars // 2 - 100
+                omitted = len(raw_output_text) - (half * 2)
+                output_text = (
+                    f"{raw_output_text[:half]}\n\n"
+                    f"[... Output truncated ({omitted} characters omitted to prevent LLM context window overflow) ...]\n\n"
+                    f"{raw_output_text[-half:]}"
+                )
+            else:
+                output_text = raw_output_text
 
             if exit_code == 0:
                 return ToolResult.ok(
                     output_text,
                     exit_code=exit_code,
-                    stdout=stdout_str,
-                    stderr=stderr_str,
+                    stdout=stdout_str[:max_chars],
+                    stderr=stderr_str[:max_chars],
                     duration_seconds=round(duration, 3),
                     working_dir=str(cwd),
                 )
@@ -193,8 +223,8 @@ class ExecuteCommandTool(BaseTool):
                 return ToolResult.fail(
                     f"Command exited with non-zero status code {exit_code}:\n{output_text}",
                     exit_code=exit_code,
-                    stdout=stdout_str,
-                    stderr=stderr_str,
+                    stdout=stdout_str[:max_chars],
+                    stderr=stderr_str[:max_chars],
                     duration_seconds=round(duration, 3),
                 )
 

@@ -12,3 +12,5 @@ export { SafetyTab } from './SafetyTab';
 export { SecurityLoginTab } from './SecurityLoginTab';
 export { StorageTab } from './StorageTab';
 export { DataControlsTab } from './DataControlsTab';
+export { AiModelsTab } from './AiModelsTab';
+export { McpIntegrationsTab } from './McpIntegrationsTab';

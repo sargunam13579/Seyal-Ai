@@ -296,13 +296,14 @@ def is_conv_manually_renamed(conv_id: str) -> bool:
 def should_periodically_update_title(message_count: int, is_manually_renamed: bool = False) -> bool:
     """
     Decide whether dynamic title should be re-evaluated as conversation evolves.
-    - Evaluates on every completed turn (message_count >= 2 and message_count % 2 == 0)
+    - Evaluates at strategic milestones (message_count in (6, 12)) to avoid exhausting API quotas
     - NEVER if user has manually renamed the chat!
     """
     if is_manually_renamed:
         return False
 
-    if message_count >= 2 and (message_count % 2 == 0):
+    # Strategic milestones only (turn 3 and turn 6) to save LLM rate limits
+    if message_count in (6, 12):
         return True
 
     return False

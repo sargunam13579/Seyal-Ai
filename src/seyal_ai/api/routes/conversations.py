@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from seyal_ai.api.schemas import (
     BatchDeleteRequest,
@@ -18,7 +18,9 @@ from seyal_ai.api.schemas import (
     ConversationSummary,
     ConversationUpdateRequest,
     DeleteResponse,
+    MessageEditRequest,
     MessageSchema,
+    ToolCallInfo,
 )
 from seyal_ai.database.engine import get_session
 from seyal_ai.database.repositories.conversation import ConversationRepository
@@ -35,6 +37,39 @@ log = get_logger("api.conversations")
 router = APIRouter(tags=["conversations"])
 
 
+def _format_message_schema(msg: Any) -> MessageSchema:
+    """Helper to convert ORM Message with ToolCalls to MessageSchema."""
+    t_calls = []
+    for tc in getattr(msg, "tool_calls", []) or []:
+        res_str = None
+        suc = True
+        if getattr(tc, "results", None):
+            r = tc.results[0]
+            suc = r.success
+            res_str = (
+                r.result_data.get("output")
+                if isinstance(r.result_data, dict)
+                else str(r.result_data)
+            )
+        t_calls.append(
+            ToolCallInfo(
+                name=tc.tool_name,
+                arguments=tc.parameters or {},
+                result=res_str,
+                success=suc,
+            )
+        )
+    return MessageSchema(
+        id=msg.id,
+        role=msg.role,
+        content=msg.content,
+        timestamp=msg.timestamp,
+        model_used=getattr(msg, "model_used", None),
+        latency_ms=getattr(msg, "latency_ms", None),
+        tool_calls=t_calls,
+    )
+
+
 @router.get(
     "/conversations",
     response_model=ConversationListResponse,
@@ -44,8 +79,9 @@ router = APIRouter(tags=["conversations"])
 async def list_conversations(
     page: int = 1,
     page_size: int = 0,
+    query: str | None = None,
 ) -> ConversationListResponse:
-    """List all conversations (unlimited when page_size <= 0)."""
+    """List all conversations (unlimited when page_size <= 0, or filtered by search query)."""
     try:
         async with get_session() as session:
             repo = ConversationRepository(session)
@@ -54,6 +90,7 @@ async def list_conversations(
             conversations, total = await repo.list_conversations(
                 offset=offset,
                 limit=limit,
+                query=query,
             )
 
             # Build summaries without a per-conversation count_messages call.
@@ -108,13 +145,8 @@ async def get_conversation(conversation_id: str) -> ConversationDetail:
                 )
 
             messages = [
-                MessageSchema(
-                    id=msg.id,
-                    role=msg.role,
-                    content=msg.content,
-                    timestamp=msg.timestamp,
-                )
-                for msg in conversation.messages
+                _format_message_schema(msg)
+                for msg in (conversation.messages or [])
             ]
 
             return ConversationDetail(
@@ -351,6 +383,57 @@ async def generate_dynamic_conversation_title(
         raise
 
 
+@router.put(
+    "/conversations/{conversation_id}/messages/{message_id}",
+    response_model=ConversationDetail,
+    summary="Edit message and branch conversation",
+    description="Update an earlier message's text and prune subsequent turns to allow branching or regenerating.",
+)
+async def edit_conversation_message(
+    conversation_id: str,
+    message_id: str,
+    body: MessageEditRequest,
+    request: Request,
+) -> ConversationDetail:
+    """Edit an earlier message in a conversation and prune subsequent turns."""
+    try:
+        async with get_session() as session:
+            repo = ConversationRepository(session)
+            conv = await repo.edit_message_and_truncate_subsequent(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                new_content=body.content.strip(),
+            )
+            if conv is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Message '{message_id}' not found in conversation '{conversation_id}'.",
+                )
+
+            # Invalidate backend RAM context so it re-hydrates the edited branch
+            brain = getattr(request.app.state, "brain", None)
+            if brain and hasattr(brain, "reset_conversation"):
+                brain.reset_conversation(conversation_id)
+
+            messages = [
+                _format_message_schema(msg)
+                for msg in (conv.messages or [])
+            ]
+
+            log.info("Edited message %s in conversation %s and pruned subsequent turns.", message_id, conversation_id)
+            return ConversationDetail(
+                id=conv.id,
+                summary=conv.summary,
+                created_at=conv.created_at,
+                messages=messages,
+            )
+    except HTTPException:
+        raise
+    except Exception as err:
+        log.error("Failed to edit message in conversation: %s", err)
+        raise HTTPException(status_code=500, detail=str(err)) from err
+
+
 @router.delete(
     "/conversations/{conversation_id}",
     response_model=DeleteResponse,
@@ -429,5 +512,135 @@ async def purge_all_conversations() -> dict[str, Any]:
     except Exception as e:
         log.error("Failed to purge conversations: %s", e)
         return {"success": False, "error": str(e)}
+
+
+@router.get(
+    "/conversations/{conversation_id}/export",
+    summary="Export conversation transcript",
+    description="Export full conversation transcript in Markdown, JSON, or Plain Text format.",
+)
+async def export_conversation(
+    conversation_id: str,
+    format: str = Query("markdown", description="Export format: markdown, json, or text"),
+) -> Response:
+    """Export conversation transcript."""
+    import json
+
+    format_clean = format.lower().strip()
+    if format_clean not in ("markdown", "json", "text"):
+        format_clean = "markdown"
+
+    try:
+        async with get_session() as session:
+            repo = ConversationRepository(session)
+            conv = await repo.get_conversation(conversation_id)
+            if not conv:
+                raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
+
+            clean_title = (conv.summary or "Seyal_AI_Conversation").replace("[Computer-Use]", "").strip()
+            safe_filename = "".join(c if c.isalnum() or c in "-_" else "_" for c in clean_title) or "conversation"
+
+            if format_clean == "json":
+                data = {
+                    "id": conv.id,
+                    "title": clean_title,
+                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                    "messages": [
+                        {
+                            "id": m.id,
+                            "role": m.role,
+                            "content": m.content,
+                            "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                            "model_used": getattr(m, "model_used", None),
+                            "latency_ms": getattr(m, "latency_ms", None),
+                            "tool_calls": [
+                                {
+                                    "name": tc.tool_name,
+                                    "parameters": tc.parameters,
+                                    "success": tc.results[0].success if getattr(tc, "results", None) else True,
+                                    "result": (
+                                        tc.results[0].result_data.get("output")
+                                        if getattr(tc, "results", None) and isinstance(tc.results[0].result_data, dict)
+                                        else None
+                                    ),
+                                }
+                                for tc in (getattr(m, "tool_calls", []) or [])
+                            ],
+                        }
+                        for m in (conv.messages or [])
+                    ],
+                }
+                return Response(
+                    content=json.dumps(data, indent=2, ensure_ascii=False),
+                    media_type="application/json; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{safe_filename}.json"'},
+                )
+
+            if format_clean == "text":
+                lines = [
+                    f"Seyal AI Conversation: {clean_title}",
+                    f"ID: {conv.id}",
+                    f"Date: {conv.created_at}",
+                    "=" * 60,
+                    "",
+                ]
+                for m in (conv.messages or []):
+                    role_label = "User" if m.role == "user" else "Seyal AI"
+                    lines.append(f"[{role_label}] - {m.timestamp}")
+                    lines.append(m.content)
+                    lines.append("")
+                    for tc in (getattr(m, "tool_calls", []) or []):
+                        lines.append(f"  [Tool Executed]: {tc.tool_name}")
+                    lines.append("-" * 40)
+                    lines.append("")
+                return Response(
+                    content="\n".join(lines),
+                    media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{safe_filename}.txt"'},
+                )
+
+            # Default: Markdown
+            md_lines = [
+                f"# {clean_title}",
+                f"> *Exported from Seyal AI*",
+                f"> *Session ID*: `{conv.id}` | *Created*: {conv.created_at}",
+                "",
+                "---",
+                "",
+            ]
+            for m in (conv.messages or []):
+                time_str = m.timestamp.strftime("%Y-%m-%d %H:%M:%S") if m.timestamp else ""
+                if m.role == "user":
+                    md_lines.append(f"### 👤 User (*{time_str}*)\n")
+                    md_lines.append(f"{m.content}\n")
+                else:
+                    model_info = f" | Model: `{m.model_used}`" if getattr(m, "model_used", None) else ""
+                    latency_info = f" | Latency: `{m.latency_ms}ms`" if getattr(m, "latency_ms", None) else ""
+                    md_lines.append(f"### 🤖 Seyal AI (*{time_str}*{model_info}{latency_info})\n")
+                    md_lines.append(f"{m.content}\n")
+                    for tc in (getattr(m, "tool_calls", []) or []):
+                        md_lines.append(f"> 🛠️ **Tool Executed**: `{tc.tool_name}`")
+                        if tc.parameters:
+                            md_lines.append(f"> *Arguments*: `{tc.parameters}`")
+                        if getattr(tc, "results", None):
+                            r = tc.results[0]
+                            res_val = r.result_data.get("output") if isinstance(r.result_data, dict) else str(r.result_data)
+                            if res_val:
+                                snippet = str(res_val)[:300] + ("..." if len(str(res_val)) > 300 else "")
+                                md_lines.append(f"> *Result*: `{snippet}`")
+                        md_lines.append("")
+                md_lines.append("---\n")
+
+            return Response(
+                content="\n".join(md_lines),
+                media_type="text/markdown; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="{safe_filename}.md"'},
+            )
+    except HTTPException:
+        raise
+    except Exception as err:
+        log.error("Failed to export conversation %s: %s", conversation_id, err)
+        raise HTTPException(status_code=500, detail=str(err)) from err
+
 
 

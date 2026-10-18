@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Square,
   Layers,
-  Send,
-  Compass,
   Plus,
   ArrowUp,
   User,
@@ -12,9 +9,8 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
   Mic,
-  Sparkles,
+  MicOff,
 } from 'lucide-react';
 import { useSeyalAi } from '../../context/SeyalAiContext';
 import { useVoice } from '../../context/VoiceContext';
@@ -72,46 +68,144 @@ export const ConvoComputerUseAgentView: React.FC = () => {
     isTextInputPopupOpen,
     setIsTextInputPopupOpen,
     userProfileAvatar,
+    isTaskExecuting,
+    setIsTaskExecuting,
+    agentStatus,
+    setAgentStatus,
+    liveSteps,
+    setLiveSteps,
   } = useSeyalAi();
 
   const {
-    isListening,
     isSpeaking,
+    isUserSpeaking,
     interimTranscript,
-    recognitionLang,
-    setRecognitionLang,
     startListening,
-    stopListening,
     speakInstant,
     speakAssistantResponse,
+    preloadAssistantAudio,
     getNextTurnId,
     stopSpeaking,
     setProcessing,
-    setVoiceModeEnabled,
+    registerBargeInHandler,
+    registerTranscriptHandler,
+    isMuted,
+    toggleMute,
+    autoListen,
   } = useVoice();
   const userName = identity?.user_name || 'User';
   const wasVoiceTriggered = useRef<boolean>(true);
-  const autoListen = true; // Always active internally for hands-free workflow
   const isMountedRef = useRef<boolean>(true);
-
+  const activeConvoTurnRef = useRef<number>(0);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
   const [inputMessage, setInputMessage] = useState('');
-  const [steerText, setSteerText] = useState('');
+  const isMutedRef = useRef<boolean>(isMuted);
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
   const [isWaiting, setIsWaiting] = useState(false);
-  const [isTaskExecuting, setIsTaskExecuting] = useState(false);
+  const [isAgentGenerating, setIsAgentGenerating] = useState(false);
   const isTaskExecutingRef = useRef<boolean>(false);
   isTaskExecutingRef.current = isTaskExecuting;
 
-  const isBusy = isWaiting || isTaskExecuting;
+  const isBusy = isWaiting || isTaskExecuting || isAgentGenerating;
   const isBusyRef = useRef<boolean>(false);
   isBusyRef.current = isBusy;
 
-  const [agentStatus, setAgentStatus] = useState<string>('idle');
-  const [liveSteps, setLiveSteps] = useState<StepItem[]>([]);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [expandedTraceIdx, setExpandedTraceIdx] = useState<number | null>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
+
+  // Immediate real-time interruption (barge-in):
+  // When user begins speaking mid-generation or during speech:
+  // 1. Immediately abort active backend stream and network fetch
+  // 2. Halt voice output and desktop task
+  // 3. Freeze assistant bubble so text stops updating immediately
+  // 4. Reset waiting/generating state so user's live speech bubble renders without delay
+  useEffect(() => {
+    if (!registerBargeInHandler) return;
+    const unsubscribe = registerBargeInHandler(() => {
+      console.log('[CONVO VIEW] Barge-in triggered: aborting stream, freezing bubble, and listening to user');
+      if (activeAbortControllerRef.current) {
+        try {
+          activeAbortControllerRef.current.abort();
+        } catch {}
+        activeAbortControllerRef.current = null;
+      }
+      stopSpeaking();
+      if (isTaskExecutingRef.current) {
+        api.stopComputerUse().catch(() => {});
+      }
+      activeConvoTurnRef.current += 1;
+      setIsWaiting(false);
+      setIsAgentGenerating(false);
+      setIsTaskExecuting(false);
+      isTaskExecutingRef.current = false;
+      setLiveSteps([]);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [registerBargeInHandler, stopSpeaking]);
+
+  // Permanent Transcript Handler (Push #22/23 style flawless delivery):
+  // Whenever user finishes speaking, VoiceContext commits the final transcript here.
+  // It immediately triggers handleSend to display the user message bubble and get agent reply!
+  useEffect(() => {
+    if (!registerTranscriptHandler) return;
+    const unsubscribe = registerTranscriptHandler((spokenText) => {
+      if (!isMountedRef.current || isMutedRef.current) return;
+      if (spokenText && spokenText.trim()) {
+        const cleanSpoken = spokenText.trim();
+        console.log('[CONVO VIEW] User speech received from VoiceContext:', cleanSpoken);
+        stopSpeaking();
+        if (isTaskExecutingRef.current) {
+          api.steerComputerUse(cleanSpoken, true).catch(() => {});
+          addActivity({
+            type: 'chat',
+            title: 'Voice Steering Injected',
+            detail: cleanSpoken,
+            status: 'info',
+          });
+          speakInstant(`Steering instruction received: ${cleanSpoken}`);
+        } else {
+          handleSend(cleanSpoken, true);
+        }
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [registerTranscriptHandler, stopSpeaking, speakInstant]);
+
+  // Immediate fail-safe: as soon as user begins speaking or first interim word arrives while agent is generating/waiting:
+  // Abort old turn immediately so text streaming halts and user sees their own words streaming live!
+  useEffect(() => {
+    if ((interimTranscript && interimTranscript.trim().length > 0) || isUserSpeaking) {
+      if (isAgentGenerating || isWaiting || isTaskExecutingRef.current) {
+        console.log('[CONVO VIEW] User speech detected mid-generation: freezing old bubble & showing user words!');
+        if (activeAbortControllerRef.current) {
+          try {
+            activeAbortControllerRef.current.abort();
+          } catch {}
+          activeAbortControllerRef.current = null;
+        }
+        stopSpeaking();
+        if (isTaskExecutingRef.current) {
+          api.stopComputerUse().catch(() => {});
+        }
+        activeConvoTurnRef.current += 1;
+        setIsWaiting(false);
+        setIsAgentGenerating(false);
+        setIsTaskExecuting(false);
+        isTaskExecutingRef.current = false;
+        setLiveSteps([]);
+      }
+    }
+  }, [interimTranscript, isUserSpeaking, isAgentGenerating, isWaiting, stopSpeaking]);
 
   // Focus text input when popup opens
   useEffect(() => {
@@ -150,22 +244,10 @@ export const ConvoComputerUseAgentView: React.FC = () => {
 
   // Helper to start listening for user voice input (works across all subsequent turns)
   const triggerVoiceListen = useCallback(() => {
-    if (!isMountedRef.current || isListening) return;
+    if (!isMountedRef.current || isMutedRef.current) return;
     wasVoiceTriggered.current = true;
-    startListening((finalTranscript) => {
-      if (!isMountedRef.current) return;
-      if (finalTranscript && finalTranscript.trim()) {
-        const spokenText = finalTranscript.trim();
-        if (isTaskExecutingRef.current) {
-          // If currently executing a real desktop task, spoken input acts as live voice steering
-          handleVoiceSteer(spokenText);
-        } else if (!isBusyRef.current) {
-          // Start conversation or goal from spoken command
-          handleSend(spokenText, true);
-        }
-      }
-    }, recognitionLang || 'auto');
-  }, [startListening, recognitionLang, isListening]);
+    startListening();
+  }, [startListening]);
 
   // Listen to Global Push-to-Talk Hotkey from Electron (Ctrl+Space / Alt+Space)
   useEffect(() => {
@@ -184,7 +266,7 @@ export const ConvoComputerUseAgentView: React.FC = () => {
   // so there is zero latency/delay when the user wants to speak,
   // while allowing agent conversation to start simultaneously without waiting.
   useEffect(() => {
-    if (autoListen) {
+    if (autoListen && !isMutedRef.current) {
       console.log('[STARTUP] Pre-activating microphone stream immediately on app open...');
       triggerVoiceListen();
     }
@@ -249,7 +331,7 @@ export const ConvoComputerUseAgentView: React.FC = () => {
               }
               return next;
             });
-            if (isMountedRef.current && autoListen) {
+            if (isMountedRef.current && autoListen && !isMutedRef.current) {
               triggerVoiceListen();
             }
           },
@@ -268,108 +350,141 @@ export const ConvoComputerUseAgentView: React.FC = () => {
       };
 
       triggerGreeting();
-    } else if (autoListen && !isListening && !isSpeaking && !isBusy) {
+    } else if (autoListen && !isMuted && !isSpeaking && !isBusy) {
       // User navigated back from Simple Chat or other tab: Silent standby, do NOT repeat welcome!
       triggerVoiceListen();
     }
-  }, [userName, autoListen, isListening, isSpeaking, isBusy, triggerVoiceListen, getNextTurnId, speakAssistantResponse]);
+  }, [userName, autoListen, isMuted, isSpeaking, isBusy, triggerVoiceListen, getNextTurnId, speakAssistantResponse]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const plusButtonRef = useRef<HTMLButtonElement | null>(null);
+  const isUserScrolledUpRef = useRef<boolean>(false);
 
-  // Scroll to bottom on message count or task updates (not on every streaming word)
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [computerUseMessages.length, isBusy, isTaskExecuting, liveSteps.length]);
-
-  // Simultaneous live speech streaming directly into user text-bar word-by-word
-  useEffect(() => {
-    if (interimTranscript && isListening && !isBusy) {
-      const isStatusText =
-        interimTranscript.includes('Listening') ||
-        interimTranscript.includes('Recognizing') ||
-        interimTranscript.includes('🎙️');
-      if (!isStatusText && interimTranscript.trim()) {
-        setInputMessage(interimTranscript);
-      }
-    }
-  }, [interimTranscript, isListening, isBusy]);
-
-  // Close add menu on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
-        setShowAddMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+  // Track manual user scrolling: if user scrolled up more than 160px from bottom, respect reading position
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    isUserScrolledUpRef.current = scrollHeight - scrollTop - clientHeight > 160;
   }, []);
 
-  // Cleanup on unmount (when user switches view or returns to simple chat)
-  useEffect(() => {
-    return () => {
-      api.stopComputerUse().catch(() => { });
-      stopSpeaking();
-      stopListening();
-      setVoiceModeEnabled(false);
-      if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+  // Smoothly or instantly scroll chat view to the bottom
+  const scrollToBottom = useCallback((force = false, smooth = false) => {
+    if (!force && isUserScrolledUpRef.current) return;
+    if (scrollContainerRef.current) {
+      if (smooth) {
+        scrollContainerRef.current.scrollTo({
+          top: scrollContainerRef.current.scrollHeight,
+          behavior: 'smooth',
+        });
+      } else {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
       }
-    };
-  }, [stopSpeaking, stopListening, setVoiceModeEnabled]);
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
+  }, []);
 
-  // Poll status when executing a task or waiting for response
+  const lastMessageContent = computerUseMessages[computerUseMessages.length - 1]?.content || '';
+
+  // Continuous Auto-scroll: Triggers as agent reply streams in word-by-word ("vara vara"),
+  // live voice interim appears, or new messages arrive
   useEffect(() => {
-    let interval: any = null;
-    if (isBusy) {
-      interval = setInterval(async () => {
-        try {
-          const res = await api.getComputerUseStatus();
-          setAgentStatus(res.status);
-          if (res.history) {
-            setLiveSteps(res.history);
-          }
-          if (res.is_task) {
-            setIsTaskExecuting(true);
-            isTaskExecutingRef.current = true;
-          }
-          if (['completed', 'failed', 'stopped', 'idle'].includes(res.status) && !res.is_task) {
-            setIsTaskExecuting(false);
-            isTaskExecutingRef.current = false;
-          }
-        } catch (e) {
-          console.debug('Status poll error', e);
-        }
-      }, 1000);
+    scrollToBottom();
+  }, [
+    computerUseMessages.length,
+    lastMessageContent,
+    isWaiting,
+    isAgentGenerating,
+    isTaskExecuting,
+    liveSteps.length,
+    interimTranscript,
+    isUserSpeaking,
+    scrollToBottom,
+  ]);
+
+  // Close add menu on outside click or clicking plus button
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      // If clicking inside the menu, keep it open
+      if (addMenuRef.current && addMenuRef.current.contains(target)) {
+        return;
+      }
+      // If clicking the plus button itself, let the button's onClick handle toggle
+      if (plusButtonRef.current && plusButtonRef.current.contains(target)) {
+        return;
+      }
+      // Otherwise, user clicked outside: close the menu!
+      setShowAddMenu(false);
+    };
+
+    if (showAddMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAddMenu]);
+
+
+  // Poll status when executing a task or waiting for response (pauses when window is minimized)
+  useEffect(() => {
+    let interval: any = null;
+
+    const poll = async () => {
+      try {
+        const res = await api.getComputerUseStatus();
+        setAgentStatus(res.status);
+        if (res.history && isTaskExecutingRef.current) {
+          setLiveSteps(res.history);
+        }
+        if (res.is_task) {
+          setIsTaskExecuting(true);
+          isTaskExecutingRef.current = true;
+        }
+        if (['completed', 'failed', 'stopped', 'idle'].includes(res.status) && !res.is_task) {
+          setIsTaskExecuting(false);
+          isTaskExecutingRef.current = false;
+        }
+      } catch (e) {
+        console.debug('Status poll error', e);
+      }
+    };
+
+    const startPolling = () => {
       if (interval) clearInterval(interval);
+      if (isBusy && !document.hidden) {
+        poll();
+        interval = setInterval(poll, 1000);
+      }
+    };
+
+    startPolling();
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (interval) clearInterval(interval);
+      } else if (isBusy) {
+        startPolling();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [isBusy]);
 
   const handleToggleMic = () => {
-    if (isListening) {
-      stopListening();
+    toggleMute();
+    if (!isMuted) {
       wasVoiceTriggered.current = false;
     } else {
+      wasVoiceTriggered.current = true;
       triggerVoiceListen();
-    }
-  };
-
-  const handleVoiceSteer = async (spokenSteer: string) => {
-    if (!spokenSteer.trim()) return;
-    try {
-      await api.steerComputerUse(spokenSteer.trim(), true);
-      addActivity({
-        type: 'chat',
-        title: 'Voice Steering Injected',
-        detail: spokenSteer.trim(),
-        status: 'info',
-      });
-      speakInstant(`Steering instruction received: ${spokenSteer}`);
-    } catch (err: any) {
-      console.error('Voice steer failed:', err);
     }
   };
 
@@ -396,7 +511,39 @@ export const ConvoComputerUseAgentView: React.FC = () => {
 
   const handleSend = async (customGoal?: string, fromVoice = false) => {
     const goal = (customGoal || inputMessage).trim();
-    if (!goal || isBusy) return;
+    if (!goal) return;
+
+    // 1. Immediately abort active network stream from any prior turn
+    if (activeAbortControllerRef.current) {
+      try {
+        activeAbortControllerRef.current.abort();
+      } catch (e) {
+        console.debug('Error aborting prior stream:', e);
+      }
+      activeAbortControllerRef.current = null;
+    }
+
+    // 2. Immediately stop audio speech output
+    stopSpeaking();
+
+    // 3. Halt prior task execution on backend if active
+    if (isTaskExecutingRef.current) {
+      api.stopComputerUse().catch(() => {});
+    }
+    setIsTaskExecuting(false);
+    isTaskExecutingRef.current = false;
+    setLiveSteps([]);
+
+    // 4. Invalidate all previous turn operations so old callbacks can never touch state or bubbles
+    activeConvoTurnRef.current += 1;
+    const currentTurnId = activeConvoTurnRef.current;
+
+    // 5. Create fresh AbortController for this turn
+    const abortController = new AbortController();
+    activeAbortControllerRef.current = abortController;
+
+    const isCancelled = () =>
+      activeConvoTurnRef.current !== currentTurnId || abortController.signal.aborted;
 
     if (fromVoice) {
       wasVoiceTriggered.current = true;
@@ -414,18 +561,24 @@ export const ConvoComputerUseAgentView: React.FC = () => {
     setShowAddMenu(false);
 
     const userMsg: MessageItem = {
+      id: 'user-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
       role: 'user',
       content: goal,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
     };
 
-    setComputerUseMessages((prev) => [...prev, userMsg]);
+    // Remove any incomplete/empty assistant bubbles from interrupted turns before adding user message
+    setComputerUseMessages((prev) => {
+      const filtered = prev.filter((m) => m.role !== 'assistant' || m.content.trim().length > 0);
+      return [...filtered, userMsg];
+    });
+
+    isUserScrolledUpRef.current = false;
+    setTimeout(() => scrollToBottom(true, true), 30);
     setIsWaiting(true);
-    setIsTaskExecuting(false);
-    isTaskExecutingRef.current = false;
+    setIsAgentGenerating(true);
     setProcessing(true);
     setAgentStatus('thinking');
-    setLiveSteps([]);
 
     addActivity({
       type: 'tool_exec',
@@ -434,21 +587,58 @@ export const ConvoComputerUseAgentView: React.FC = () => {
       status: 'info',
     });
 
+    let isTaskMode = false;
+    interface VoiceQueueItem {
+      text: string;
+      audioPromise: Promise<Blob | null>;
+    }
+    const sentenceQueue: VoiceQueueItem[] = [];
+    let isQueueProcessing = false;
+    let spokenCommitText = '';
+    let clauseBuffer = '';
+    let isFirstClauseSent = false;
+    let isStreamCompleted = false;
+    let finalFullNarration = '';
+    let liveStreamedText = '';
+
+    let safetyTimeout: any = null;
+
     try {
-      let isTaskMode = false;
+      safetyTimeout = setTimeout(() => {
+        if (isMountedRef.current && !isCancelled()) {
+          setIsAgentGenerating(false);
+          setIsWaiting(false);
+        }
+      }, 25000);
+
       const assistantMsgId = 'assistant-' + Date.now();
-      let assistantBubbleCreated = false;
+
+      // Immediately mount assistant bubble into conversation so thinking indicator appears
+      setComputerUseMessages((prev) => [
+        ...prev,
+        {
+          id: assistantMsgId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          model_used: 'gemini-2.5-flash',
+        },
+      ]);
 
       // Helper to update the assistant message bubble in the UI
-      const updateAssistantBubble = (text: string) => {
+      const updateAssistantBubble = (text: string, steps?: StepItem[]) => {
+        if (isCancelled()) return;
         setComputerUseMessages((prev) => {
           const idx = prev.findIndex((m) => m.id === assistantMsgId);
           if (idx !== -1) {
             const next = [...prev];
-            next[idx] = { ...next[idx], content: text };
+            next[idx] = {
+              ...next[idx],
+              content: text,
+              steps: steps || next[idx].steps,
+            };
             return next;
           } else {
-            assistantBubbleCreated = true;
             return [
               ...prev,
               {
@@ -457,69 +647,101 @@ export const ConvoComputerUseAgentView: React.FC = () => {
                 content: text,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
                 model_used: 'gemini-2.5-flash',
+                steps,
               },
             ];
           }
         });
+        scrollToBottom();
       };
 
-      // Streaming Voice & Simultaneous Text Engine
-      let sentenceBuffer = '';
-      let spokenCompletedText = '';
-      const sentenceQueue: string[] = [];
-      let isQueueProcessing = false;
-      let isStreamCompleted = false;
-      let finalFullNarration = '';
+      const checkAllCompleted = () => {
+        if (isCancelled()) return;
+        if (isStreamCompleted && sentenceQueue.length === 0 && !isQueueProcessing) {
+          if (safetyTimeout) {
+            clearTimeout(safetyTimeout);
+            safetyTimeout = null;
+          }
+          setIsAgentGenerating(false);
+          setIsWaiting(false);
+          // Commit final complete text so nothing is clipped
+          if (finalFullNarration || liveStreamedText) {
+            updateAssistantBubble(finalFullNarration || liveStreamedText);
+          }
+          if (autoListen && isMountedRef.current && !isMutedRef.current && !isCancelled()) {
+            setTimeout(() => {
+              if (!isCancelled() && !isMutedRef.current) {
+                triggerVoiceListen();
+              }
+            }, 120);
+          }
+        }
+      };
 
-      const processSentenceQueue = () => {
+      const processSentenceQueue = async () => {
+        if (isCancelled()) {
+          sentenceQueue.length = 0;
+          return;
+        }
         if (isQueueProcessing) return;
         if (sentenceQueue.length === 0) {
-          if (isStreamCompleted) {
-            if (finalFullNarration && finalFullNarration !== spokenCompletedText) {
-              updateAssistantBubble(finalFullNarration);
-            }
-            if (autoListen && isMountedRef.current) {
-              setTimeout(() => {
-                triggerVoiceListen();
-              }, 100);
-            }
-          }
+          checkAllCompleted();
           return;
         }
 
-        const nextSentence = sentenceQueue.shift()!;
+        const item = sentenceQueue.shift()!;
         isQueueProcessing = true;
-        const turnId = getNextTurnId();
+        const voiceTurnId = getNextTurnId();
 
-        // Reveal empty bubble initially if not yet created so UI shows thinking/speaking state
-        if (!assistantBubbleCreated) {
-          updateAssistantBubble('');
+        let preloadedBlob: Blob | null = null;
+        try {
+          preloadedBlob = await item.audioPromise;
+        } catch {
+          preloadedBlob = null;
+        }
+
+        if (isCancelled()) {
+          sentenceQueue.length = 0;
+          isQueueProcessing = false;
+          return;
         }
 
         speakAssistantResponse(
-          nextSentence,
-          turnId,
+          item.text,
+          voiceTurnId,
           // onEnd:
           () => {
-            spokenCompletedText += (spokenCompletedText ? ' ' : '') + nextSentence;
-            updateAssistantBubble(spokenCompletedText);
+            if (isCancelled()) return;
+            spokenCommitText += (spokenCommitText ? ' ' : '') + item.text;
+            updateAssistantBubble(spokenCommitText);
             isQueueProcessing = false;
             processSentenceQueue();
           },
           // onStart:
+          () => {
+            if (isCancelled()) return;
+            setIsWaiting(false);
+          },
+          // onProgress: Simultaneous Word-by-Word Text Display in sync with audio
+          (revealedInSentence) => {
+            if (isCancelled()) return;
+            const currentDisplay = (spokenCommitText ? spokenCommitText + ' ' : '') + revealedInSentence;
+            const textToDisplay = liveStreamedText && liveStreamedText.length >= currentDisplay.length
+              ? liveStreamedText
+              : currentDisplay;
+            updateAssistantBubble(textToDisplay);
+          },
           undefined,
-          // onProgress: simultaneous word-by-word streaming in exact sync with voice!
-          (revealedWordPortion) => {
-            const currentDisplay = (spokenCompletedText ? spokenCompletedText + ' ' : '') + revealedWordPortion;
-            updateAssistantBubble(currentDisplay);
-          }
+          preloadedBlob
         );
       };
 
       const enqueueSentence = (sentence: string) => {
+        if (isCancelled()) return;
         const clean = sentence.trim();
         if (!clean) return;
-        sentenceQueue.push(clean);
+        const audioPromise = preloadAssistantAudio(clean);
+        sentenceQueue.push({ text: clean, audioPromise });
         processSentenceQueue();
       };
 
@@ -529,28 +751,53 @@ export const ConvoComputerUseAgentView: React.FC = () => {
         true,
         targetConvId || undefined,
         (chunk) => {
+          if (isCancelled()) return;
+          liveStreamedText += chunk;
+          clauseBuffer += chunk;
           setIsWaiting(false);
-          sentenceBuffer += chunk;
+          updateAssistantBubble(liveStreamedText);
 
-          // Check for natural sentence boundaries (. ! ? \n or Indian sentence endings)
+          if (!isFirstClauseSent) {
+            const earlyMatch = clauseBuffer.match(/^(.*?[,;:\n.?!—]+)(\s+.*|$)/s);
+            if (earlyMatch && earlyMatch[1].trim().length >= 2) {
+              const firstPhrase = earlyMatch[1].trim();
+              clauseBuffer = earlyMatch[2] ? earlyMatch[2].trimStart() : '';
+              isFirstClauseSent = true;
+              enqueueSentence(firstPhrase);
+            } else {
+              const words = clauseBuffer.trim().split(/\s+/);
+              if (words.length >= 3) {
+                const firstPhrase = words.slice(0, 2).join(' ');
+                clauseBuffer = words.slice(2).join(' ');
+                isFirstClauseSent = true;
+                enqueueSentence(firstPhrase);
+              }
+            }
+          }
+
           let match: RegExpMatchArray | null = null;
-          while ((match = sentenceBuffer.match(/^(.*?[.?!;\n]+)(\s+.*|$)/s)) !== null) {
+          while ((match = clauseBuffer.match(/^(.*?[.?!;\n]+)(\s+.*|$)/s)) !== null) {
+            if (isCancelled()) return;
             const completeSentence = match[1].trim();
-            sentenceBuffer = match[2] ? match[2].trimStart() : '';
+            clauseBuffer = match[2] ? match[2].trimStart() : '';
             if (completeSentence) {
+              isFirstClauseSent = true;
               enqueueSentence(completeSentence);
             }
           }
 
-          // If a phrase gets longer than 12 words without punctuation, split at word boundary for fast speech start
-          const words = sentenceBuffer.trim().split(/\s+/);
-          if (words.length >= 12) {
-            const splitPoint = words.slice(0, 8).join(' ');
-            sentenceBuffer = words.slice(8).join(' ');
-            enqueueSentence(splitPoint);
+          if (clauseBuffer.trim().split(/\s+/).length >= 10) {
+            const commaMatch = clauseBuffer.match(/^(.*?[,;:\n—]+)(\s+.*|$)/s);
+            if (commaMatch && commaMatch[1].trim().split(/\s+/).length >= 3) {
+              const clausePart = commaMatch[1].trim();
+              clauseBuffer = commaMatch[2] ? commaMatch[2].trimStart() : '';
+              isFirstClauseSent = true;
+              enqueueSentence(clausePart);
+            }
           }
         },
         (startedConvId, isTask) => {
+          if (isCancelled()) return;
           isTaskMode = isTask;
           if (startedConvId) {
             setComputerUseConversationId(startedConvId);
@@ -564,10 +811,12 @@ export const ConvoComputerUseAgentView: React.FC = () => {
           }
         },
         (ackText) => {
+          if (isCancelled()) return;
           setIsWaiting(false);
           enqueueSentence(ackText);
         },
         (result) => {
+          if (isCancelled()) return;
           if (result.conversation_id) {
             setComputerUseConversationId(result.conversation_id);
             computerUseConversationIdRef.current = result.conversation_id;
@@ -577,14 +826,18 @@ export const ConvoComputerUseAgentView: React.FC = () => {
           if (result.history) {
             setLiveSteps(result.history);
           }
-          finalFullNarration = result.narration || '';
+          finalFullNarration = result.narration || liveStreamedText;
           isStreamCompleted = true;
 
-          if (sentenceBuffer.trim()) {
-            enqueueSentence(sentenceBuffer.trim());
-            sentenceBuffer = '';
+          if (result.history && result.history.length > 0) {
+            updateAssistantBubble(finalFullNarration || liveStreamedText, result.history);
+          }
+
+          if (clauseBuffer.trim()) {
+            enqueueSentence(clauseBuffer.trim());
+            clauseBuffer = '';
           } else {
-            processSentenceQueue();
+            checkAllCompleted();
           }
 
           addActivity({
@@ -593,10 +846,27 @@ export const ConvoComputerUseAgentView: React.FC = () => {
             detail: (result.narration || 'Completed').slice(0, 100),
             status: 'success',
           });
-        }
+        },
+        abortController.signal
       );
+
+      if (isCancelled()) return;
+
+      isStreamCompleted = true;
+      if (clauseBuffer.trim()) {
+        enqueueSentence(clauseBuffer.trim());
+        clauseBuffer = '';
+      } else {
+        checkAllCompleted();
+      }
     } catch (err: any) {
+      if (isCancelled() || err?.name === 'AbortError' || abortController.signal.aborted) {
+        // Turn was interrupted and cancelled — exit without producing ghost/error bubbles
+        return;
+      }
       console.error('Computer-use execution error:', err);
+      setIsAgentGenerating(false);
+      setIsWaiting(false);
       const rawErrMsg = err?.response?.data?.detail || err.message || '';
       const isHttpOrNetworkError = /404|500|502|503|fetch|network|failed to fetch/i.test(rawErrMsg);
       const friendlyReply = isHttpOrNetworkError
@@ -617,53 +887,58 @@ export const ConvoComputerUseAgentView: React.FC = () => {
         status: isHttpOrNetworkError ? 'success' : 'error',
       });
     } finally {
-      setIsWaiting(false);
-      setIsTaskExecuting(false);
-      isTaskExecutingRef.current = false;
-      setProcessing(false);
-      setAgentStatus('idle');
-      refreshConversations();
+      if (activeConvoTurnRef.current === currentTurnId) {
+        isStreamCompleted = true;
+        setIsWaiting(false);
+        setIsTaskExecuting(false);
+        isTaskExecutingRef.current = false;
+        setProcessing(false);
+        setAgentStatus('idle');
+        refreshConversations();
+        if (!isQueueProcessing && sentenceQueue.length === 0) {
+          setIsAgentGenerating(false);
+          if (safetyTimeout) {
+            clearTimeout(safetyTimeout);
+            safetyTimeout = null;
+          }
+        }
+      }
     }
   };
 
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+
+  // Permanent Transcript Handler subscription: Ensures user speech is 100% committed to user bubble
+  // and agent reply is invoked, exactly matching Push #22/23 reliability with live streaming interim!
+  useEffect(() => {
+    const unregister = registerTranscriptHandler((spokenText) => {
+      if (!isMountedRef.current || isMutedRef.current) return;
+      if (spokenText && spokenText.trim()) {
+        const cleanSpoken = spokenText.trim();
+        stopSpeaking();
+        if (isTaskExecutingRef.current) {
+          api.steerComputerUse(cleanSpoken, true).catch(() => {});
+        } else {
+          handleSendRef.current(cleanSpoken, true);
+        }
+      }
+    });
+    return unregister;
+  }, [registerTranscriptHandler, stopSpeaking]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      if (showAddMenu) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowAddMenu(false);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-    }
-  };
-
-  const handleSteer = async () => {
-    if (!steerText.trim()) return;
-    try {
-      await api.steerComputerUse(steerText.trim(), true);
-      addActivity({
-        type: 'chat',
-        title: 'Live Steering Injected',
-        detail: steerText.trim(),
-        status: 'info',
-      });
-      setSteerText('');
-    } catch (err: any) {
-      console.error('Steer failed:', err);
-    }
-  };
-
-  const handleStop = async () => {
-    try {
-      await api.stopComputerUse();
-      setIsTaskExecuting(false);
-      isTaskExecutingRef.current = false;
-      setIsWaiting(false);
-      setAgentStatus('stopped');
-      addActivity({
-        type: 'security',
-        title: 'Computer-Use Emergency Stop',
-        detail: 'Emergency stop signal sent.',
-        status: 'warning',
-      });
-    } catch (err: any) {
-      console.error(err);
     }
   };
 
@@ -719,135 +994,24 @@ export const ConvoComputerUseAgentView: React.FC = () => {
     <div className={`flex-1 flex flex-col min-h-0 relative w-full h-full transition-all duration-300 ${isHeroLogoOpen ? 'blur-[2.5px]' : ''}`}>
       {/* Upper Chatting Workspace (Banner + Messages) */}
       <div id="convo-chat-area" className="flex-1 flex flex-col min-h-0 relative w-full overflow-hidden">
-        {/* Hero Live Voice Waveform / Real-Time Speech Perception Banner */}
-        <div className="px-6 pt-3 pb-1 shrink-0 w-full">
-          <div className="w-[70%] mx-auto">
-            {isListening ? (
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/80 via-slate-900/90 to-blue-950/80 border border-cyan-400/50 shadow-lg shadow-cyan-950/30 flex items-center justify-between gap-3 animate-fadeIn backdrop-blur-xl">
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  {/* Pulsing Voice Equalizer Bars */}
-                  <div className="flex items-end gap-1 h-5 shrink-0 px-1">
-                    <span className="w-1 bg-cyan-400 rounded-full animate-[bounce_0.8s_infinite_100ms] h-3" />
-                    <span className="w-1 bg-cyan-300 rounded-full animate-[bounce_0.6s_infinite_200ms] h-5" />
-                    <span className="w-1 bg-blue-400 rounded-full animate-[bounce_0.9s_infinite_150ms] h-4" />
-                    <span className="w-1 bg-emerald-400 rounded-full animate-[bounce_0.7s_infinite_300ms] h-5" />
-                    <span className="w-1 bg-cyan-400 rounded-full animate-[bounce_0.8s_infinite_250ms] h-3" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-bold text-cyan-300 tracking-wider uppercase">
-                        🎙️ Voice Active — Listening to You...
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-200 font-medium truncate mt-0.5">
-                      {interimTranscript ? (
-                        <span className="text-cyan-300 font-semibold">“{interimTranscript}”</span>
-                      ) : (
-                        'Speak your task (e.g. "Open Camera and take a pic", "Delete hello chat")...'
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setRecognitionLang(recognitionLang === 'auto' ? 'ta-IN' : recognitionLang === 'ta-IN' ? 'en-IN' : 'auto')}
-                    className="px-2 py-1 rounded-xl bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-400/50 text-[11px] font-mono text-cyan-300 flex items-center gap-1.5 transition-all shadow-sm"
-                    title="Click to cycle between Auto-Detect, Tamil, and English"
-                  >
-                    <RefreshCw className="w-3 h-3 text-cyan-400" />
-                    <span>{recognitionLang === 'auto' ? '⚡ Auto-Detect (Tamil/Tanglish/English)' : recognitionLang === 'ta-IN' ? '🇮🇳 தமிழ் (ta-IN)' : '🌐 English (en-IN)'}</span>
-                  </button>
-                  <button
-                    onClick={stopListening}
-                    className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 shrink-0"
-                  >
-                    Mute Mic
-                  </button>
-                </div>
-              </div>
-            ) : isSpeaking ? (
-              <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/80 via-slate-900/90 to-indigo-950/80 border border-purple-500/50 shadow-lg shadow-purple-950/30 flex items-center justify-between gap-3 animate-fadeIn backdrop-blur-xl">
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <Volume2 className="w-4 h-4 text-purple-400 animate-pulse shrink-0" />
-                  <span className="text-xs font-mono text-purple-300 truncate">
-                    🔊 Seyal AI Speaking live response...
-                  </span>
-                </div>
-                <button
-                  onClick={stopSpeaking}
-                  className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 shrink-0"
-                >
-                  Stop Speech
-                </button>
-              </div>
-            ) : isTaskExecuting ? (
-              <div className="p-3 rounded-2xl bg-gradient-to-r from-amber-950/70 via-slate-900/90 to-slate-950/80 border border-amber-500/40 shadow-lg flex items-center justify-between gap-3 animate-fadeIn backdrop-blur-xl">
-                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                  <Compass className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
-                  <span className="text-xs font-mono text-amber-300 truncate">
-                    ⚡ Autonomous Computer Task Running — Speak anytime to voice-steer or tap stop
-                  </span>
-                </div>
-                <button
-                  onClick={triggerVoiceListen}
-                  className="px-2.5 py-1 rounded-xl bg-amber-900/40 hover:bg-amber-900/60 border border-amber-500/50 text-[11px] font-mono text-amber-200 shrink-0"
-                >
-                  🎙️ Speak Steer
-                </button>
-              </div>
-            ) : isWaiting ? (
-              <div className="p-2.5 rounded-2xl bg-slate-900/80 border border-cyan-500/30 flex items-center justify-between gap-3 text-xs text-cyan-300 animate-fadeIn">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse shrink-0" />
-                  <span className="text-[11px] font-mono text-cyan-200 truncate">
-                    Seyal AI is thinking & preparing response...
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="p-2.5 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-between gap-3 text-xs text-slate-400">
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <Mic className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                  <span className="text-[11px] font-mono text-slate-300 truncate">
-                    Primary Voice Ready ({recognitionLang === 'auto' ? '⚡ Auto-Detect: Tamil / Tanglish / English / Hindi' : recognitionLang === 'ta-IN' ? '🇮🇳 தமிழ்' : '🌐 English'}) — Tap mic or speak
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setRecognitionLang(recognitionLang === 'auto' ? 'ta-IN' : recognitionLang === 'ta-IN' ? 'en-IN' : 'auto')}
-                    className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] font-mono text-cyan-300"
-                    title="Cycle speech recognition language mode"
-                  >
-                    {recognitionLang === 'auto' ? '⚡ Auto' : recognitionLang === 'ta-IN' ? '🇮🇳 தமிழ்' : '🌐 English'}
-                  </button>
-                  <button
-                    onClick={triggerVoiceListen}
-                    className="px-2.5 py-0.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-[11px] font-mono text-cyan-300"
-                  >
-                    Start Voice
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
 
         {/* Messages Scroll Container (w-[70%] with 15% gutters on both sides) */}
-        <div className="flex-1 overflow-y-auto px-2 pt-6 pb-4 custom-scrollbar w-full">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-2 pt-6 pb-4 custom-scrollbar w-full"
+        >
           <div className="w-[70%] mx-auto space-y-6">
             {/* Message Bubbles */}
             {computerUseMessages.map((msg, idx) => {
               const isUser = msg.role === 'user';
               const isTraceExpanded = expandedTraceIdx === idx;
-              if (!isUser && !msg.content) return null;
 
               return (
                 <div
-                  key={idx}
-                  className={`flex items-start gap-3.5 w-full animate-fadeIn group ${isUser ? 'justify-end' : 'justify-start'
+                  key={msg.id || `${msg.role}-${idx}-${msg.timestamp || ''}`}
+                  style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
+                  className={`flex items-start gap-3.5 w-full group ${isUser ? 'justify-end' : 'justify-start'
                     }`}
                 >
                   {!isUser && (
@@ -855,7 +1019,7 @@ export const ConvoComputerUseAgentView: React.FC = () => {
                       <img
                         src={appLogo}
                         alt="Seyal AI"
-                        className="w-full h-full object-cover rounded-full"
+                        className={`w-full h-full object-cover rounded-full ${idx === computerUseMessages.length - 1 && (isWaiting || isAgentGenerating) ? 'animate-pulse' : ''}`}
                       />
                     </div>
                   )}
@@ -877,55 +1041,85 @@ export const ConvoComputerUseAgentView: React.FC = () => {
                             )}
                           </>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-cyan-400 py-1">
-                            <span className="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                            <span className="text-xs font-mono text-slate-400">Seyal AI speaking...</span>
-                          </span>
+                          <div className="flex items-center gap-1.5 py-1 px-0.5" title="Seyal AI responding...">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '0ms' }} />
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '180ms' }} />
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '360ms' }} />
+                          </div>
                         )}
                       </p>
 
                       {/* Vision-Action Step Summary Card if Assistant */}
-                      {!isUser && liveSteps.length > 0 && idx === computerUseMessages.length - 1 && (
-                        <div className="mt-4 pt-3 border-t border-slate-800/80">
-                          <button
-                            onClick={() => setExpandedTraceIdx(isTraceExpanded ? null : idx)}
-                            className="flex items-center justify-between w-full text-xs font-mono text-cyan-400 hover:text-cyan-300 py-1"
-                          >
-                            <span className="flex items-center gap-1.5">
-                              <Layers className="w-3.5 h-3.5" />
-                              Vision-Action Execution Trace ({liveSteps.length} Steps)
-                            </span>
-                            {isTraceExpanded ? (
-                              <ChevronUp className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                      {/* Vision-Action Step Summary Card if Assistant */}
+                      {!isUser && (() => {
+                        const traceSteps = (msg.steps && msg.steps.length > 0)
+                          ? msg.steps
+                          : (idx === computerUseMessages.length - 1 ? liveSteps : []);
+                        const hasTrace = traceSteps && traceSteps.length > 0;
+                        const isCurrentlyRunning = idx === computerUseMessages.length - 1 && isTaskExecuting;
 
-                          {isTraceExpanded && (
-                            <div className="mt-2.5 space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
-                              {liveSteps.map((step, sIdx) => (
-                                <div
-                                  key={sIdx}
-                                  className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-mono text-cyan-400 font-bold">
-                                      STEP #{step.step}
-                                    </span>
-                                    <span className="font-mono text-[10px] text-slate-400">
-                                      {step.elapsed_seconds}s • {step.action}
-                                    </span>
-                                  </div>
-                                  <p className="text-slate-300 text-[11px] italic">
-                                    "{step.thought}"
-                                  </p>
+                        if (!hasTrace && !isCurrentlyRunning) return null;
+
+                        return (
+                          <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2">
+                            {isCurrentlyRunning && (
+                              <div className="flex items-center justify-between text-xs font-mono text-cyan-300 font-bold">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                                  <span>Agent Status: {agentStatus.toUpperCase()}</span>
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                                {hasTrace && (
+                                  <span className="text-[10px] text-slate-400 font-normal">
+                                    {traceSteps.length} step(s) executed
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {hasTrace && (
+                              <>
+                                <button
+                                  onClick={() => setExpandedTraceIdx(isTraceExpanded ? null : idx)}
+                                  className="flex items-center justify-between w-full text-xs font-mono text-cyan-400 hover:text-cyan-300 py-1"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <Layers className="w-3.5 h-3.5" />
+                                    Vision-Action Execution Trace ({traceSteps.length} Steps)
+                                  </span>
+                                  {isTraceExpanded ? (
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+
+                                {isTraceExpanded && (
+                                  <div className="mt-2.5 space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-1">
+                                    {traceSteps.map((step, sIdx) => (
+                                      <div
+                                        key={sIdx}
+                                        className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1"
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <span className="font-mono text-cyan-400 font-bold">
+                                            STEP #{step.step}
+                                          </span>
+                                          <span className="font-mono text-[10px] text-slate-400">
+                                            {step.elapsed_seconds}s • {step.action}
+                                          </span>
+                                        </div>
+                                        <p className="text-slate-300 text-[11px] italic">
+                                          "{step.thought}"
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* User Message Footer */}
@@ -993,50 +1187,28 @@ export const ConvoComputerUseAgentView: React.FC = () => {
               );
             })}
 
-            {/* Active Computer-Use Execution Progress Bubble (ONLY for real desktop OS tasks!) */}
-            {isTaskExecuting && (
-              <div className="flex items-start gap-3.5 justify-start animate-fadeIn w-full">
-                <div className="w-8 h-8 rounded-full overflow-hidden border border-cyan-400/60 bg-slate-950 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-cyan-950/40 ring-1 ring-cyan-400/40">
-                  <img
-                    src={appLogo}
-                    alt="Seyal AI"
-                    className="w-full h-full object-cover rounded-full animate-pulse"
-                  />
-                </div>
-                <div className="p-4 rounded-2xl rounded-tl-sm bg-slate-900/95 border border-cyan-500/40 text-slate-200 text-xs sm:text-sm font-mono space-y-2 max-w-[85%] shadow-lg shadow-cyan-950/30">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2 text-cyan-300 font-bold">
-                      <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                      <span>Agent Status: {agentStatus.toUpperCase()}</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400">
-                      {liveSteps.length} step(s) executed
+            {/* Live Outgoing User Voice Bubble — only displays live spoken words */}
+            {Boolean(interimTranscript && interimTranscript.trim()) && (
+              <div className="flex items-start gap-3.5 justify-end animate-fadeIn w-full">
+                <div className="relative max-w-[85%] p-5 rounded-2xl rounded-tr-sm bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-950/30 border border-cyan-400/40">
+                  <div className="flex items-center flex-wrap gap-2 text-sm sm:text-base leading-relaxed">
+                    <span className="font-normal text-white tracking-wide">
+                      {interimTranscript.trim()}
                     </span>
+                    <span className="inline-block w-1.5 h-4 ml-0.5 bg-cyan-200 animate-pulse align-middle" />
                   </div>
+                </div>
 
-                  {liveSteps.length > 0 && (
-                    <p className="text-[11px] text-slate-300 italic bg-slate-950/60 p-2 rounded-lg border border-slate-800">
-                      Latest Step #{liveSteps[liveSteps.length - 1].step}: {liveSteps[liveSteps.length - 1].thought}
-                    </p>
+                <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-800 border border-cyan-400 text-slate-200 flex items-center justify-center shrink-0 mt-0.5 shadow-sm ring-2 ring-cyan-400/30">
+                  {userProfileAvatar ? (
+                    <img
+                      src={userProfileAvatar}
+                      alt="User"
+                      className="w-full h-full object-cover rounded-full"
+                    />
+                  ) : (
+                    <User className="w-4.5 h-4.5" />
                   )}
-                </div>
-              </div>
-            )}
-
-            {/* Conversational Thinking / Typing Indicator (WhatsApp-style three-dot loading) */}
-            {isWaiting && !isTaskExecuting && (!computerUseMessages.length || computerUseMessages[computerUseMessages.length - 1]?.role !== 'assistant' || !computerUseMessages[computerUseMessages.length - 1]?.content) && (
-              <div className="flex items-start gap-3.5 justify-start animate-fadeIn w-full">
-                <div className="w-8 h-8 rounded-full overflow-hidden border border-cyan-400/50 bg-slate-950 flex items-center justify-center shrink-0 mt-0.5 shadow-sm shadow-cyan-950/40 ring-1 ring-cyan-500/20">
-                  <img
-                    src={appLogo}
-                    alt="Seyal AI"
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                </div>
-                <div className="px-4 py-3.5 rounded-2xl rounded-tl-sm bg-slate-900/90 border border-slate-800/90 shadow-sm shadow-cyan-950/20 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '180ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(0,240,255,0.7)] animate-typing-dot" style={{ animationDelay: '360ms' }} />
                 </div>
               </div>
             )}
@@ -1051,40 +1223,6 @@ export const ConvoComputerUseAgentView: React.FC = () => {
       {isTextInputPopupOpen && (
         <div className="absolute bottom-6 left-0 right-0 z-40 flex justify-center px-4 pointer-events-none animate-fadeIn">
           <div className="w-[65%] relative space-y-2 pointer-events-auto">
-            {/* Live Steering & Stop Bar ONLY when an actual computer-use task is executing */}
-            {isTaskExecuting && (
-              <div className="p-2.5 rounded-2xl bg-slate-900/95 border border-amber-500/40 backdrop-blur-2xl shadow-xl shadow-black/80 flex items-center gap-2 animate-fadeIn">
-                <div className="flex items-center gap-1.5 text-xs font-mono text-amber-400 font-semibold px-2 shrink-0">
-                  <Compass className="w-4 h-4 animate-spin" />
-                  <span className="hidden sm:inline">LIVE STEER:</span>
-                </div>
-                <input
-                  type="text"
-                  value={steerText}
-                  onChange={(e) => setSteerText(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSteer()}
-                  placeholder="Inject mid-task instruction (e.g. 'Click second button instead', 'Wait')..."
-                  className="flex-1 bg-transparent text-xs text-amber-200 placeholder-amber-500/60 focus:outline-none px-2"
-                />
-                <button
-                  onClick={handleSteer}
-                  disabled={!steerText.trim()}
-                  className="px-3 py-1 bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 disabled:opacity-30 text-amber-200 text-xs font-semibold rounded-xl flex items-center gap-1 cursor-pointer"
-                >
-                  <Send className="w-3 h-3" />
-                  <span>Steer</span>
-                </button>
-                <button
-                  onClick={handleStop}
-                  className="px-3 py-1 bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/50 text-rose-300 text-xs font-semibold rounded-xl flex items-center gap-1 cursor-pointer"
-                  title="Emergency Stop"
-                >
-                  <Square className="w-3 h-3 fill-rose-400" />
-                  <span className="hidden sm:inline">Stop</span>
-                </button>
-              </div>
-            )}
-
             {/* Plus (+) Menu Popup: Quick Presets */}
             {showAddMenu && (
               <div
@@ -1112,10 +1250,11 @@ export const ConvoComputerUseAgentView: React.FC = () => {
             <div className="flex items-center gap-2.5 px-4 py-3 rounded-full bg-slate-900/95 border border-slate-700/80 focus-within:border-cyan-400 focus-within:ring-2 focus-within:ring-cyan-500/20 backdrop-blur-2xl shadow-2xl shadow-black/80 transition-colors">
               {/* Plus Button (+) */}
               <button
+                ref={plusButtonRef}
                 type="button"
-                onClick={() => setShowAddMenu(!showAddMenu)}
+                onClick={() => setShowAddMenu((prev) => !prev)}
                 className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-cyan-300 transition-all shrink-0 focus:outline-none cursor-pointer"
-                title="Preset Recipes"
+                title={showAddMenu ? "Close Presets" : "Preset Recipes"}
               >
                 <Plus
                   className={`w-5 h-5 transition-transform duration-200 ${
@@ -1124,50 +1263,44 @@ export const ConvoComputerUseAgentView: React.FC = () => {
                 />
               </button>
 
-              {/* Text Input (with real-time simultaneous voice streaming) */}
-              <div className="flex-1 flex items-center relative">
+              {/* Text Input - Completely seamless & borderless (No inner box shape) */}
+              <div className="flex-1 flex items-center relative min-w-0 bg-transparent" style={{ border: 'none', outline: 'none' }}>
                 <input
                   ref={textInputRef}
                   data-seyal-input="true"
                   type="text"
-                  value={inputMessage}
+                  value={inputMessage || (interimTranscript ? interimTranscript : '')}
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={isBusy}
-                  placeholder="Type or speak computer instruction..."
-                  className="w-full bg-transparent text-slate-100 placeholder-slate-500 text-sm sm:text-base focus:outline-none px-2 py-1 disabled:opacity-50"
+                  placeholder={interimTranscript ? "Listening to your voice..." : "Type or speak computer instruction..."}
+                  className="w-full bg-transparent text-slate-100 placeholder-slate-500 text-sm sm:text-base px-2 py-1 border-0 border-none outline-none focus:outline-none ring-0 focus:ring-0 shadow-none"
+                  style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
                 />
-                {isListening && interimTranscript && (
-                  <span className="absolute right-2 flex items-center gap-1.5 text-[11px] font-mono text-cyan-400 pointer-events-none animate-pulse bg-slate-950/80 px-2 py-0.5 rounded-md border border-cyan-500/30">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                    Live Voice
-                  </span>
-                )}
               </div>
 
-              {/* Primary Live Voice Microphone Button */}
+              {/* Simple Circular Microphone Button for Mute / Unmute */}
               <button
                 type="button"
                 onClick={handleToggleMic}
-                disabled={isBusy}
-                className={`relative px-3.5 py-2 rounded-full flex items-center gap-2 transition-all shrink-0 focus:outline-none cursor-pointer ${
-                  isListening
-                    ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white shadow-[0_0_20px_rgba(244,63,94,0.6)] scale-105 ring-2 ring-rose-300 animate-pulse'
-                    : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold shadow-[0_0_16px_rgba(0,240,255,0.4)] hover:scale-105'
+                className={`w-9 h-9 rounded-full flex items-center justify-center transition-all shrink-0 focus:outline-none cursor-pointer ${
+                  !isMuted
+                    ? 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/50 shadow-[0_0_12px_rgba(0,240,255,0.25)]'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700'
                 }`}
-                title={isListening ? 'Listening live... Tap to mute' : 'Tap to speak voice command'}
+                title={!isMuted ? 'Mute microphone' : 'Unmute microphone'}
               >
-                <Mic className={`w-4 h-4 ${isListening ? 'text-white animate-bounce' : 'text-slate-950'}`} />
-                <span className="text-xs font-mono font-semibold hidden sm:inline">
-                  {isListening ? 'Listening...' : 'Voice Input'}
-                </span>
+                {!isMuted ? (
+                  <Mic className="w-4 h-4 text-cyan-400" />
+                ) : (
+                  <MicOff className="w-4 h-4 text-slate-400" />
+                )}
               </button>
 
               {/* Send Button (↑) for Typed Input */}
               <button
                 type="button"
                 onClick={() => handleSend()}
-                disabled={!inputMessage.trim() || isBusy}
+                disabled={!inputMessage.trim()}
                 className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 disabled:opacity-20 text-slate-300 hover:text-white font-bold flex items-center justify-center transition-all shrink-0 border border-slate-700 focus:outline-none cursor-pointer"
                 title="Send Typed Message"
               >

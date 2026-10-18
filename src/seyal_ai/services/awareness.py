@@ -46,6 +46,8 @@ class LaptopAwarenessService:
 
     def __init__(self) -> None:
         AWARENESS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        self._ram_cache: dict[str, Any] | None = None
+        self._ram_cache_time: float = 0.0
 
     def get_installed_apps(self) -> list[dict[str, Any]]:
         """
@@ -341,18 +343,28 @@ class LaptopAwarenessService:
         return result
 
     def get_cached_awareness(self) -> dict[str, Any]:
-        """Load from cache if fresh, otherwise scan immediately."""
+        """Load from RAM cache if fresh, then disk, otherwise scan immediately."""
+        now = time.time()
+        # Fast Path 1: In-memory RAM cache (0.0ms)
+        if hasattr(self, "_ram_cache") and self._ram_cache and (now - getattr(self, "_ram_cache_time", 0) < 300):
+            return self._ram_cache
+
+        # Fast Path 2: Local cache file
         if AWARENESS_CACHE_FILE.exists():
             try:
                 with open(AWARENESS_CACHE_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    # If cache is valid, return it
                     if data and "installed_apps" in data:
+                        self._ram_cache = data
+                        self._ram_cache_time = now
                         return data
             except Exception as e:
                 log.debug("Cache read failed, re-scanning: %s", e)
 
-        return self.scan_all_awareness()
+        result = self.scan_all_awareness()
+        self._ram_cache = result
+        self._ram_cache_time = now
+        return result
 
     def get_live_telemetry(self) -> dict[str, Any]:
         """

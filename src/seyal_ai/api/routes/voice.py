@@ -6,9 +6,11 @@ REST endpoints for voice transcription, synthesis, and configuration.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+import asyncio
 import json
+from typing import Any
 import numpy as np
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 
 from seyal_ai.api.schemas import (
@@ -28,6 +30,7 @@ router = APIRouter(prefix="/voice", tags=["voice"])
 
 # Module-level STT engine cache to avoid re-init overhead per request
 _stt_engine_cache: dict[str, STTEngine] = {}
+_tts_engine_cache: dict[str, Any] = {}
 
 
 def _get_cached_stt_engine(provider_name: str, language: str) -> STTEngine:
@@ -39,6 +42,19 @@ def _get_cached_stt_engine(provider_name: str, language: str) -> STTEngine:
             language=language,
         )
     return _stt_engine_cache[cache_key]
+
+
+def _get_cached_tts_engine(provider_name: str, voice: str, speed: float):
+    """Return a cached TTSEngine, avoiding re-instantiation overhead."""
+    cache_key = f"{provider_name}:{voice}:{speed}"
+    if cache_key not in _tts_engine_cache:
+        from seyal_ai.voice.tts import TTSEngine
+        _tts_engine_cache[cache_key] = TTSEngine(
+            provider_name=provider_name,
+            voice=voice,
+            speed=speed,
+        )
+    return _tts_engine_cache[cache_key]
 
 
 def _get_brain(request: Request):
@@ -129,11 +145,9 @@ async def synthesize_speech(
     Returns audio bytes (MP3 for Edge TTS, WAV for pyttsx3).
     """
     try:
-        from seyal_ai.voice.tts import TTSEngine
-
         settings = request.app.state.settings
 
-        tts = TTSEngine(
+        tts = _get_cached_tts_engine(
             provider_name=settings.voice.tts_provider,
             voice=body.voice or settings.voice.tts.voice,
             speed=body.speed or settings.voice.tts.speed,
@@ -323,12 +337,15 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
 
     from seyal_ai.voice.vad import VADState, VoiceActivityDetector
 
-    vad = VoiceActivityDetector(sample_rate=16000, silence_threshold_ms=1800, min_speech_ms=250, energy_threshold=100)
+    vad = VoiceActivityDetector(sample_rate=16000, silence_threshold_ms=480, min_speech_ms=180, energy_threshold=100)
     vad.reset()
 
     language = "auto"
     is_speaking_turn = False
     speech_chunks: list[np.ndarray] = []
+    last_interim_time = 0.0
+    interim_task: asyncio.Task | None = None
+    current_turn_seq = 0
 
     try:
         # Acknowledge connection
@@ -363,20 +380,65 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                 if len(raw_bytes) == 0:
                     continue
 
-                # Discard microphone input while assistant is speaking or preparing speech (prevents self-hearing echo)
-                if is_speaking_turn:
-                    speech_chunks.clear()
-                    continue
-
                 # Interpret bytes as 16-bit signed PCM
                 chunk_int16 = np.frombuffer(raw_bytes, dtype=np.int16)
-                vad_state = vad.process_chunk(chunk_int16)
+                vad_state = vad.process_chunk(chunk_int16, is_assistant_speaking=is_speaking_turn)
 
                 if vad_state == VADState.SPEECH:
+                    if is_speaking_turn:
+                        # Acoustic Barge-In: User spoke while assistant was speaking!
+                        log.info("Acoustic barge-in detected mid-speech: muting playback and capturing speech")
+                        is_speaking_turn = False
+                        current_turn_seq += 1
+                        # Notify frontend immediately to silence playback
+                        await websocket.send_text(json.dumps({
+                            "event": "barge_in",
+                            "message": "Acoustic interruption detected",
+                        }))
+                        await websocket.send_text(json.dumps({
+                            "event": "speech_started",
+                            "message": "User started speaking",
+                        }))
+                    elif len(speech_chunks) == 0:
+                        current_turn_seq += 1
+                        # Immediate notification to frontend that user started speaking
+                        await websocket.send_text(json.dumps({
+                            "event": "speech_started",
+                            "message": "User started speaking",
+                        }))
+                    # PRESERVE all speech chunks (do not clear user's words on barge-in)
                     speech_chunks.append(chunk_int16)
 
+                    # Trigger non-blocking real-time interim streaming STT every ~450ms on valid speech (>= 6000 samples / 375ms)
+                    import time
+                    now = time.time()
+                    total_samples = sum(len(c) for c in speech_chunks)
+                    if total_samples >= 6000 and (now - last_interim_time >= 0.45):
+                        if interim_task is None or interim_task.done():
+                            last_interim_time = now
+                            current_audio = np.concatenate(speech_chunks)
+                            curr_lang = language
+                            seq = current_turn_seq
+
+                            async def _stream_interim(audio_data: np.ndarray, lang: str, turn_seq: int):
+                                try:
+                                    fast_stt = _get_cached_stt_engine("google_web", lang)
+                                    res = await fast_stt.transcribe_with_language(
+                                        audio_data, 16000, lang, fast_interim=True
+                                    )
+                                    if res.text and res.text.strip() and turn_seq == current_turn_seq:
+                                        await websocket.send_text(json.dumps({
+                                            "event": "interim_transcript",
+                                            "text": res.text.strip(),
+                                            "language": res.language,
+                                        }))
+                                except Exception as interim_err:
+                                    log.debug("Realtime interim STT notice: %s", interim_err)
+
+                            interim_task = asyncio.create_task(_stream_interim(current_audio, curr_lang, seq))
+
                 elif vad_state == VADState.SILENCE and speech_chunks:
-                    # Speech segment completed: transcribe
+                    # Speech segment completed: run final STT without prematurely killing active interim task
                     full_audio = np.concatenate(speech_chunks)
                     speech_chunks = []
                     vad.reset()
@@ -395,6 +457,13 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
 
                             stt = _get_cached_stt_engine(stt_prov, language)
                             trans_res = await stt.transcribe_with_language(full_audio, 16000, language)
+
+                            # Turn complete: cancel any residual interim task and advance turn sequence
+                            current_turn_seq += 1
+                            if interim_task and not interim_task.done():
+                                interim_task.cancel()
+                            interim_task = None
+
                             if trans_res.text and trans_res.text.strip():
                                 await websocket.send_text(json.dumps({
                                     "event": "transcript",
@@ -408,6 +477,10 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                                     "language": language,
                                 }))
                         except Exception as stt_err:
+                            current_turn_seq += 1
+                            if interim_task and not interim_task.done():
+                                interim_task.cancel()
+                            interim_task = None
                             log.debug("Realtime STT transcribe notice: %s", stt_err)
                             try:
                                 await websocket.send_text(json.dumps({
@@ -417,6 +490,11 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                                 }))
                             except Exception:
                                 pass
+                    else:
+                        current_turn_seq += 1
+                        if interim_task and not interim_task.done():
+                            interim_task.cancel()
+                        interim_task = None
 
     except WebSocketDisconnect:
         log.info("Client disconnected from Realtime Voice WebSocket")

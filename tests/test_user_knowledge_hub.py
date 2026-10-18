@@ -9,7 +9,9 @@ Tests:
 
 import tempfile
 from pathlib import Path
+
 import pytest
+
 from seyal_ai.services.user_knowledge_service import UserKnowledgeService
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -104,6 +105,25 @@ def _find_windows_app_path(app_name: str) -> str | None:
     return None
 
 
+def _parse_command_arguments(arguments: str | None) -> list[str]:
+    """Parse application arguments preserving quoted substrings, spaces, and Windows backslashes."""
+    if not arguments or not arguments.strip():
+        return []
+    is_windows = platform.system() == "Windows"
+    try:
+        raw_parts = shlex.split(arguments, posix=not is_windows)
+        clean_parts: list[str] = []
+        for p in raw_parts:
+            # Strip enclosing quotes since subprocess / list2cmdline quotes arguments containing spaces automatically
+            if len(p) >= 2 and ((p.startswith('"') and p.endswith('"')) or (p.startswith("'") and p.endswith("'"))):
+                clean_parts.append(p[1:-1])
+            else:
+                clean_parts.append(p)
+        return clean_parts
+    except Exception:
+        return arguments.split()
+
+
 # ---------------------------------------------------------------------------
 # Open / Launch Application
 # ---------------------------------------------------------------------------
@@ -184,7 +204,7 @@ class OpenApplicationTool(BaseTool):
             else:
                 cmd_parts = [target]
                 if arguments:
-                    cmd_parts.extend(arguments.split())
+                    cmd_parts.extend(_parse_command_arguments(arguments))
                 subprocess.Popen(cmd_parts, shell=True, cwd=cwd)
 
             return ToolResult.ok(

@@ -11,11 +11,13 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from seyal_ai.security.permissions import PermissionScopeManager
+from seyal_ai.security.permissions import PermissionScopeManager, get_permission_engine
 
 router = APIRouter(prefix="/permissions", tags=["permissions"])
 
-_scope_manager = PermissionScopeManager()
+
+def _get_scope_manager() -> PermissionScopeManager:
+    return get_permission_engine().scope_manager
 
 
 class GrantScopeRequest(BaseModel):
@@ -34,7 +36,7 @@ class SetModeRequest(BaseModel):
 @router.get("", summary="List all permission scopes")
 async def list_permissions() -> dict[str, Any]:
     """Get the current status of all capability permission scopes."""
-    scopes = _scope_manager.list_scopes()
+    scopes = _get_scope_manager().list_scopes()
     return {
         "scopes": {
             k: {
@@ -53,7 +55,7 @@ async def list_permissions() -> dict[str, Any]:
 @router.post("/mode", summary="Set permission 3-way mode")
 async def set_permission_mode(req: SetModeRequest) -> dict[str, Any]:
     """Set 3-way permission mode: allow, ask, or block."""
-    _scope_manager.set_mode(req.scope, req.mode)
+    _get_scope_manager().set_mode(req.scope, req.mode)
     return {
         "success": True,
         "scope": req.scope,
@@ -65,7 +67,7 @@ async def set_permission_mode(req: SetModeRequest) -> dict[str, Any]:
 @router.post("/grant", summary="Grant a permission scope")
 async def grant_permission(req: GrantScopeRequest) -> dict[str, Any]:
     """Explicitly grant a capability permission scope."""
-    _scope_manager.grant_scope(req.scope)
+    _get_scope_manager().grant_scope(req.scope)
     return {
         "success": True,
         "scope": req.scope,
@@ -77,7 +79,7 @@ async def grant_permission(req: GrantScopeRequest) -> dict[str, Any]:
 @router.post("/revoke", summary="Revoke a permission scope")
 async def revoke_permission(req: RevokeScopeRequest) -> dict[str, Any]:
     """Explicitly revoke a capability permission scope."""
-    _scope_manager.revoke_scope(req.scope)
+    _get_scope_manager().revoke_scope(req.scope)
     return {
         "success": True,
         "scope": req.scope,
@@ -89,6 +91,6 @@ async def revoke_permission(req: RevokeScopeRequest) -> dict[str, Any]:
 @router.post("/reset", summary="Reset permissions to defaults")
 async def reset_permissions() -> dict[str, Any]:
     """Reset all capability scopes to default granted state."""
-    _scope_manager.reset_defaults()
+    _get_scope_manager().reset_defaults()
     return {"success": True, "message": "All permission scopes reset to defaults."}
 

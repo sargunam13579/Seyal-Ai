@@ -55,12 +55,23 @@ class BrowserInteraction:
         except Exception:
             pass
 
-        # Strategy 4: Fallback fuzzy XPath text contains
+        # Strategy 4: Fallback fuzzy XPath text contains (with safe quote escaping and nested text support)
         try:
+            clean_target = target.lower()
+            if "'" in clean_target and '"' not in clean_target:
+                escaped_val = f'"{clean_target}"'
+            elif "'" in clean_target and '"' in clean_target:
+                # Split and build concat(...)
+                parts = clean_target.split("'")
+                concat_args = ", ".join(f'"{p}", "\'"' for p in parts[:-1]) + f', "{parts[-1]}"'
+                escaped_val = f"concat({concat_args})"
+            else:
+                escaped_val = f"'{clean_target}'"
+
             xpath = (
-                "//*[contains(translate(text(), "
+                "//*[contains(translate(string(.), "
                 "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), "
-                f"'{target.lower()}')]"
+                f"{escaped_val})]"
             )
             await page.locator(xpath).first.click(timeout=timeout_ms)
             return True

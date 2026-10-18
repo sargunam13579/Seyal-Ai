@@ -105,6 +105,7 @@ class VoicePipeline:
         self._state = PipelineState.STOPPED
         self._running = False
         self._listen_task: asyncio.Task | None = None
+        self._processing_task: asyncio.Task | None = None
         self._event_bus = get_event_bus()
 
         # State change callbacks
@@ -260,13 +261,20 @@ class VoicePipeline:
         log.info("Stopping voice pipeline...")
         self._running = False
 
-        # Cancel the listen task
+        # Cancel background tasks
         if self._listen_task and not self._listen_task.done():
             self._listen_task.cancel()
             import contextlib
 
             with contextlib.suppress(asyncio.CancelledError):
                 await self._listen_task
+
+        if self._processing_task and not self._processing_task.done():
+            self._processing_task.cancel()
+            import contextlib
+
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._processing_task
 
         # Stop all components
         self._recorder.stop()
@@ -320,14 +328,14 @@ class VoicePipeline:
                             source="voice.pipeline",
                         )
 
-                        # If currently speaking, interrupt!
-                        if self._player.is_playing and self._interrupt_enabled:
-                            log.info("User interrupted — stopping TTS")
+                        # If currently speaking, interrupt immediately (<50ms acoustic barge-in)!
+                        if self._interrupt_enabled and (self._player.is_playing or self._state == PipelineState.SPEAKING):
+                            log.info("User interrupted (acoustic barge-in) — stopping TTS playback")
                             self._player.stop()
                             self._tts.request_stop()
 
                 elif vad_result == VADState.SILENCE:
-                    # End of speech — get the segment and process
+                    # End of speech — get the segment and process in decoupled task
                     speech_segment = self._vad.get_speech_segment()
                     if speech_segment is not None and len(speech_segment) > 0:
                         await self._event_bus.emit(
@@ -335,7 +343,8 @@ class VoicePipeline:
                             {"duration_samples": len(speech_segment)},
                             source="voice.pipeline",
                         )
-                        await self._process_speech(speech_segment)
+                        # Decouple execution so listen loop continues listening concurrently
+                        self._processing_task = asyncio.create_task(self._process_speech(speech_segment))
 
             except asyncio.CancelledError:
                 break
@@ -504,15 +513,12 @@ class VoicePipeline:
 
     async def _play_mp3_bytes(self, mp3_bytes: bytes) -> None:
         """
-        Play MP3 audio bytes by converting to WAV first.
-
-        Uses ffmpeg if available, otherwise falls back to writing
-        a temp file and using sounddevice with raw playback.
+        Play MP3 audio bytes by converting to WAV first (via ffmpeg),
+        or playing cleanly via Windows native background audio (MCI).
         """
         loop = asyncio.get_event_loop()
 
         def _convert_and_play() -> None:
-
             # Write MP3 to temp file
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
                 f.write(mp3_bytes)
@@ -520,63 +526,78 @@ class VoicePipeline:
 
             wav_path = mp3_path.replace(".mp3", ".wav")
 
+            import shutil
+
             try:
-                # Try ffmpeg conversion
-                result = subprocess.run(
-                    [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        mp3_path,
-                        "-ar",
-                        str(self._sample_rate),
-                        "-ac",
-                        "1",
-                        "-f",
-                        "wav",
-                        wav_path,
-                    ],
-                    capture_output=True,
-                    timeout=10,
-                )
-                if result.returncode == 0 and Path(wav_path).exists():
-                    import wave
+                # 1. Try ffmpeg conversion if available on system PATH
+                if shutil.which("ffmpeg") is not None:
+                    result = subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            mp3_path,
+                            "-ar",
+                            str(self._sample_rate),
+                            "-ac",
+                            "1",
+                            "-f",
+                            "wav",
+                            wav_path,
+                        ],
+                        capture_output=True,
+                        timeout=8,
+                    )
+                    if result.returncode == 0 and Path(wav_path).exists():
+                        import wave
 
-                    with wave.open(wav_path, "rb") as wf:
-                        frames = wf.readframes(wf.getnframes())
-                        audio_data = np.frombuffer(frames, dtype=np.int16)
-                        audio_float = audio_data.astype(np.float32) / 32768.0
-                        self._player.play_audio(audio_float, self._sample_rate)
-                    return
-
-            except FileNotFoundError:
-                log.debug("ffmpeg not found, trying fallback MP3 playback")
+                        with wave.open(wav_path, "rb") as wf:
+                            frames = wf.readframes(wf.getnframes())
+                            audio_data = np.frombuffer(frames, dtype=np.int16)
+                            audio_float = audio_data.astype(np.float32) / 32768.0
+                            self._player.play_audio(audio_float, self._sample_rate)
+                        return
             except Exception as e:
-                log.debug("ffmpeg conversion failed: %s", e)
+                log.debug("ffmpeg conversion notice: %s", e)
 
-            # Fallback: try to use the system default player
+            # 2. Windows Native Background Audio (MCI) - zero window popups, no external GUI
             try:
                 import platform
 
                 if platform.system() == "Windows":
-                    import os
-
-                    os.startfile(mp3_path)
+                    import ctypes
                     import time
+                    import uuid
 
-                    # Estimate playback duration (rough: ~1 second per 16KB of MP3)
-                    duration = max(1.0, len(mp3_bytes) / 16000)
-                    time.sleep(duration)
+                    alias = f"seyal_{uuid.uuid4().hex[:8]}"
+                    mci = ctypes.windll.winmm.mciSendStringW
+                    clean_path = str(Path(mp3_path).resolve())
+                    open_res = mci(f'open "{clean_path}" type mpegvideo alias {alias}', None, 0, None)
+                    if open_res == 0:
+                        try:
+                            mci(f"play {alias}", None, 0, None)
+                            status_buf = ctypes.create_unicode_buffer(128)
+                            while True:
+                                if not self._running or self._tts._stop_requested:
+                                    mci(f"stop {alias}", None, 0, None)
+                                    break
+                                mci(f"status {alias} mode", status_buf, 128, None)
+                                if status_buf.value in ("stopped", ""):
+                                    break
+                                time.sleep(0.04)
+                        finally:
+                            mci(f"close {alias}", None, 0, None)
+                        return
             except Exception as e:
                 log.warning("Could not play MP3 audio: %s", e)
 
             finally:
-                # Clean up temp files
+                # Clean up temp files cleanly without WinError 32
                 try:
                     Path(mp3_path).unlink(missing_ok=True)
                     Path(wav_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
+                except Exception as cleanup_err:
+                    log.debug("Temp audio file cleanup: %s", cleanup_err)
 
         await loop.run_in_executor(None, _convert_and_play)
 

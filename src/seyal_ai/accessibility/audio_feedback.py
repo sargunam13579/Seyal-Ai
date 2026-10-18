@@ -77,20 +77,36 @@ class AudioFeedbackManager:
         tones = _EARCON_TONES.get(earcon_type, [ToneSpec(440, 100)])
 
         if async_play:
-            thread = threading.Thread(target=self._play_tones, args=(tones,), daemon=True)
+            thread = threading.Thread(target=self._play_tones, args=(tones, earcon_type), daemon=True)
             thread.start()
         else:
-            self._play_tones(tones)
+            self._play_tones(tones, earcon_type)
 
-    def _play_tones(self, tones: list[ToneSpec]) -> None:
+    def _play_tones(self, tones: list[ToneSpec], earcon_type: EarconType | None = None) -> None:
         try:
             if winsound is not None and sys.platform == "win32":
-                for t in tones:
-                    winsound.Beep(t.frequency_hz, t.duration_ms)
+                # Map earcon type to modern Windows system sound aliases
+                sound_alias_map = {
+                    EarconType.WAKE: "SystemAsterisk",
+                    EarconType.SUCCESS: "SystemDefault",
+                    EarconType.ERROR: "SystemHand",
+                    EarconType.CONFIRMATION_REQUIRED: "SystemExclamation",
+                    EarconType.EMERGENCY_STOP: "SystemHand",
+                    EarconType.PROCESSING: "SystemNotification",
+                }
+                alias = sound_alias_map.get(earcon_type, "SystemDefault") if earcon_type else "SystemDefault"
+                try:
+                    winsound.PlaySound(alias, winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+                    return
+                except Exception:
+                    # Fallback to smooth tone if alias not found
+                    if self.volume > 0.05:
+                        for t in tones:
+                            winsound.Beep(t.frequency_hz, t.duration_ms)
             else:
-                # Terminal bell fallback on non-Windows/headless
-                sys.stdout.write("\a")
-                sys.stdout.flush()
+                if self.volume > 0.05:
+                    sys.stdout.write("\a")
+                    sys.stdout.flush()
         except Exception as e:
             log.debug("Audio feedback tone playback skipped: %s", e)
 

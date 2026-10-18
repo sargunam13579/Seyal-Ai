@@ -99,28 +99,6 @@ class VisualGroundingEngine:
                                 "center": b.center,
                             }
                         )
-
-                    # Contextual 3-dot / More Options detection for sidebar chat cards & list items:
-                    # In sidebar cards (width ~200-250px on left side), each chat item row has a 3-dots button on its right side.
-                    for b in text_blocks:
-                        txt = b.text.strip()
-                        # If item is located in left sidebar (x < 260) and is not a header/system label
-                        if b.x < 220 and b.y > 60 and len(txt) > 1 and not any(kw in txt.lower() for kw in ["nex", "agent", "history", "search", "new chat"]):
-                            # Synthesize 3-dot menu button coordinate at the right edge of this chat row
-                            dot_cx = min(int(obs.screen_width * 0.12), b.x + 190)
-                            dot_cy = b.center[1]
-                            detected.append(
-                                {
-                                    "id": f"btn-3dot-{len(detected)+1}",
-                                    "name": f"3-dots options menu for '{txt}'",
-                                    "type": "button",
-                                    "x": dot_cx - 14,
-                                    "y": dot_cy - 14,
-                                    "width": 28,
-                                    "height": 28,
-                                    "center": (dot_cx, dot_cy),
-                                }
-                            )
         except Exception as ocr_err:
             log.debug("OCR visual grounding notice: %s", ocr_err)
 

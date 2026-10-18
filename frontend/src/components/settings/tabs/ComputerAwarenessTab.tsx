@@ -13,9 +13,38 @@ import {
   PlaySquare,
   FolderOpen,
   Search,
+  Eye,
+  Camera,
+  Gauge,
+  PauseCircle,
+  CheckCircle2,
+  Lock,
+  Plus,
+  Trash2,
+  ExternalLink,
+  Zap,
+  XSquare,
 } from 'lucide-react';
 import { api } from '../../../services/api';
 import { useSeyalAi } from '../../../context/SeyalAiContext';
+
+interface ComputerControlConfig {
+  cursorGlideSpeed: 'natural' | 'smooth' | 'instant';
+  keystrokeDelayMs: number;
+  autoPauseOnUserMouseMove: boolean;
+  maskSensitiveInputFields: boolean;
+  somGroundingTags: boolean;
+  blacklistedApps: string[];
+}
+
+const defaultControlConfig: ComputerControlConfig = {
+  cursorGlideSpeed: 'natural',
+  keystrokeDelayMs: 35,
+  autoPauseOnUserMouseMove: true,
+  maskSensitiveInputFields: true,
+  somGroundingTags: true,
+  blacklistedApps: ['Bitwarden', '1Password', 'KeePass', 'Banking'],
+};
 
 const formatLaptopDateTime = (isoString?: string | null): string => {
   if (!isoString) return '';
@@ -43,11 +72,68 @@ export const ComputerAwarenessTab: React.FC = () => {
   const [isLoadingAwareness, setIsLoadingAwareness] = useState<boolean>(false);
   const [isScanningAwareness, setIsScanningAwareness] = useState<boolean>(false);
   const [awarenessSearch, setAwarenessSearch] = useState<string>('');
-  const [awarenessSubTab, setAwarenessSubTab] = useState<'all' | 'control' | 'apps' | 'running' | 'windows' | 'files' | 'sysinfo'>('all');
+  const [awarenessSubTab, setAwarenessSubTab] = useState<
+    'all' | 'vision' | 'control' | 'apps' | 'running' | 'windows' | 'files' | 'sysinfo'
+  >('all');
   const [permissionsState, setPermissionsState] = useState<Record<string, any>>({});
   const [isUpdatingPermission, setIsUpdatingPermission] = useState<Record<string, boolean>>({});
   const [autoUpdateAwareness, setAutoUpdateAwareness] = useState<boolean>(true);
   const [isLiveUpdateActive, setIsLiveUpdateActive] = useState<boolean>(false);
+
+  // Computer Control Tuning Settings
+  const [controlConfig, setControlConfig] = useState<ComputerControlConfig>(() => {
+    try {
+      const saved = localStorage.getItem('seyal_computer_control_config');
+      return saved ? { ...defaultControlConfig, ...JSON.parse(saved) } : defaultControlConfig;
+    } catch {
+      return defaultControlConfig;
+    }
+  });
+
+  // Action status / feedback toast
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [newBlacklistApp, setNewBlacklistApp] = useState<string>('');
+
+  // Live Screen Vision Test Snapshot state
+  const [isCapturingScreen, setIsCapturingScreen] = useState<boolean>(false);
+  const [screenObservation, setScreenObservation] = useState<{
+    active_window: string;
+    detected_elements_count: number;
+    screen_width: number;
+    screen_height: number;
+    som_base64_image?: string;
+    base64_image?: string;
+    timestamp: number;
+  } | null>(null);
+
+  const updateControlConfig = <K extends keyof ComputerControlConfig>(
+    key: K,
+    val: ComputerControlConfig[K]
+  ) => {
+    setControlConfig((prev) => {
+      const updated = { ...prev, [key]: val };
+      try {
+        localStorage.setItem('seyal_computer_control_config', JSON.stringify(updated));
+      } catch (err) {
+        console.error('Failed to save computer control config:', err);
+      }
+      return updated;
+    });
+  };
+
+  const handleAddBlacklistApp = () => {
+    const trimmed = newBlacklistApp.trim();
+    if (!trimmed || controlConfig.blacklistedApps.includes(trimmed)) return;
+    updateControlConfig('blacklistedApps', [...controlConfig.blacklistedApps, trimmed]);
+    setNewBlacklistApp('');
+  };
+
+  const handleRemoveBlacklistApp = (appToRemove: string) => {
+    updateControlConfig(
+      'blacklistedApps',
+      controlConfig.blacklistedApps.filter((a) => a !== appToRemove)
+    );
+  };
 
   const loadAwarenessAndPermissions = async (forceScan: boolean = false) => {
     if (forceScan) {
@@ -142,6 +228,95 @@ export const ComputerAwarenessTab: React.FC = () => {
     }
   };
 
+  // Direct Laptop Actions
+  const handleLaunchApp = async (appName: string) => {
+    setActionFeedback(`Launching ${appName}...`);
+    try {
+      const electron = (window as any).electronAPI;
+      if (electron?.openApp) {
+        await electron.openApp(appName);
+      } else {
+        await api.executeLaptopTool('launch_app', { app_name: appName });
+      }
+      setActionFeedback(`Successfully launched ${appName}.`);
+      setTimeout(() => {
+        loadAwarenessAndPermissions(false);
+        setActionFeedback(null);
+      }, 2000);
+    } catch (err: any) {
+      setActionFeedback(`Failed to launch ${appName}: ${err?.message || err}`);
+      setTimeout(() => setActionFeedback(null), 4000);
+    }
+  };
+
+  const handleFocusWindow = async (windowTitle: string) => {
+    setActionFeedback(`Focusing window '${windowTitle}'...`);
+    try {
+      await api.executeLaptopTool('focus_window', { window_title: windowTitle });
+      setActionFeedback(`Brought '${windowTitle}' to foreground.`);
+      setTimeout(() => {
+        loadAwarenessAndPermissions(false);
+        setActionFeedback(null);
+      }, 1500);
+    } catch (err: any) {
+      setActionFeedback(`Failed to focus window: ${err?.message || err}`);
+      setTimeout(() => setActionFeedback(null), 3000);
+    }
+  };
+
+  const handleCloseWindow = async (windowTitle: string) => {
+    setActionFeedback(`Closing window '${windowTitle}'...`);
+    try {
+      await api.executeLaptopTool('close_window', { window_title: windowTitle });
+      setActionFeedback(`Closed '${windowTitle}'.`);
+      setTimeout(() => {
+        loadAwarenessAndPermissions(false);
+        setActionFeedback(null);
+      }, 1500);
+    } catch (err: any) {
+      setActionFeedback(`Failed to close window: ${err?.message || err}`);
+      setTimeout(() => setActionFeedback(null), 3000);
+    }
+  };
+
+  const handleCaptureScreenSnapshot = async () => {
+    setIsCapturingScreen(true);
+    setActionFeedback('Capturing screen and grounding UI elements...');
+    try {
+      const obs = await api.observeScreenState(controlConfig.somGroundingTags);
+      if (obs) {
+        setScreenObservation(obs);
+        setActionFeedback(`Screen captured: ${obs.screen_width}x${obs.screen_height} with ${obs.detected_elements_count} UI elements detected.`);
+        addActivity({
+          type: 'tool_exec',
+          title: 'Vision Observation Captured',
+          detail: `Grounding tagged ${obs.detected_elements_count} interactable buttons & inputs on '${obs.active_window || 'Desktop'}'`,
+          status: 'success',
+        });
+      }
+    } catch (err: any) {
+      console.error('Screen capture test failed:', err);
+      setActionFeedback(`Perception test failed: ${err?.response?.data?.detail || err?.message || err}`);
+    } finally {
+      setIsCapturingScreen(false);
+      setTimeout(() => setActionFeedback(null), 5000);
+    }
+  };
+
+  const renderToggle = (checked: boolean, onChange: (val: boolean) => void) => (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`w-11 h-6 flex items-center rounded-full p-1 transition-all cursor-pointer shrink-0 ${
+        checked
+          ? 'bg-cyan-500 justify-end shadow-sm shadow-cyan-500/50'
+          : 'bg-slate-700/80 justify-start hover:bg-slate-600'
+      }`}
+    >
+      <span className="w-4 h-4 rounded-full bg-white shadow-md transition-all" />
+    </button>
+  );
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-y-auto custom-scrollbar animate-fadeIn">
       {/* Top Sticky Header */}
@@ -153,8 +328,11 @@ export const ComputerAwarenessTab: React.FC = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                Computer Awareness & Computer Control
+                <span>Computer Awareness & Autonomous Control</span>
               </h2>
+              <p className="text-xs text-slate-400">
+                Visual perception, Set-of-Marks grounding, live process introspection, and execution speeds
+              </p>
             </div>
           </div>
         </div>
@@ -187,11 +365,11 @@ export const ComputerAwarenessTab: React.FC = () => {
             <span>{isScanningAwareness ? 'Scanning Laptop...' : 'Update / Scan Laptop'}</span>
           </button>
 
-          {/* LIVE UPDATE ON/OFF SWITCH */}
+          {/* LIVE UPDATE SWITCH */}
           <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 shrink-0">
             <span className="text-xs font-medium text-slate-300 flex items-center gap-1.5 select-none">
               {isLiveUpdateActive && <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />}
-              <span>Live Update</span>
+              <span>Live Telemetry</span>
             </span>
             <button
               type="button"
@@ -212,7 +390,15 @@ export const ComputerAwarenessTab: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="p-8 sm:p-10 space-y-8 w-full">
+      <div className="p-8 sm:p-10 space-y-7 w-full">
+        {/* Action Feedback Banner */}
+        {actionFeedback && (
+          <div className="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-mono flex items-center gap-2 animate-fadeIn shadow-md">
+            <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>{actionFeedback}</span>
+          </div>
+        )}
+
         {/* 1. Quick Telemetry Metrics Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 shadow-sm flex items-center gap-3">
@@ -284,10 +470,11 @@ export const ComputerAwarenessTab: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-800/80 pb-3">
           {[
             { id: 'all', label: 'All Overview' },
-            { id: 'control', label: '🛡️ Computer Control (Permissions)' },
+            { id: 'vision', label: '👁️ Vision & Perception' },
+            { id: 'control', label: '🛡️ Control & Speed' },
+            { id: 'windows', label: `🪟 Open Windows (${awarenessData?.open_windows_count || 0})` },
             { id: 'apps', label: `📦 Installed Apps (${awarenessData?.installed_apps_count || 0})` },
             { id: 'running', label: `⚡ Running Apps (${awarenessData?.running_apps_count || 0})` },
-            { id: 'windows', label: `🪟 Open Windows (${awarenessData?.open_windows_count || 0})` },
             { id: 'files', label: '📂 Files & Drives' },
             { id: 'sysinfo', label: '💻 System Info' },
           ].map((tab) => (
@@ -295,7 +482,7 @@ export const ComputerAwarenessTab: React.FC = () => {
               key={tab.id}
               type="button"
               onClick={() => setAwarenessSubTab(tab.id as any)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
                 awarenessSubTab === tab.id
                   ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
@@ -306,13 +493,246 @@ export const ComputerAwarenessTab: React.FC = () => {
           ))}
         </div>
 
-        {/* 3. SECTION: Computer Control (Permissions & Capabilities) */}
+        {/* 3. NEW SECTION: VISION & SCREEN PERCEPTION INSPECTOR */}
+        {(awarenessSubTab === 'all' || awarenessSubTab === 'vision') && (
+          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800/80 shadow-sm space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                  <Eye className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-100">Live Vision Perception & Grounding</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Test what the AI visual agent perceives on your screen with Set-of-Marks UI element grounding
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isCapturingScreen}
+                onClick={handleCaptureScreenSnapshot}
+                className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50 shadow-md shadow-cyan-950/40"
+              >
+                <Camera className={`w-3.5 h-3.5 ${isCapturingScreen ? 'animate-pulse' : ''}`} />
+                <span>{isCapturingScreen ? 'Observing Screen...' : 'Capture & Inspect Screen'}</span>
+              </button>
+            </div>
+
+            {/* Set of Marks Grounding Toggle */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" />
+                    Set-of-Marks (SoM) Grounding Tag Overlay
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Automatically draw numeric markers and bounding boxes over interactable UI buttons & inputs.
+                  </p>
+                </div>
+                {renderToggle(controlConfig.somGroundingTags, (val) =>
+                  updateControlConfig('somGroundingTags', val)
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    Mask Sensitive Passwords & OTPs
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Auto-blur confidential inputs and banking screens when sending visual frames to the vision LLM.
+                  </p>
+                </div>
+                {renderToggle(controlConfig.maskSensitiveInputFields, (val) =>
+                  updateControlConfig('maskSensitiveInputFields', val)
+                )}
+              </div>
+            </div>
+
+            {/* Live Observation Result Card */}
+            {screenObservation && (
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-cyan-500/30 space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
+                  <div className="flex items-center gap-2 font-mono">
+                    <span className="text-cyan-300 font-bold">Active Focus:</span>
+                    <span className="text-white truncate max-w-xs">{screenObservation.active_window || 'Desktop'}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
+                    <span>Resolution: {screenObservation.screen_width} x {screenObservation.screen_height}</span>
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-bold">
+                      {screenObservation.detected_elements_count} Grounded Elements
+                    </span>
+                  </div>
+                </div>
+
+                {/* Thumbnail Snapshot */}
+                {(screenObservation.som_base64_image || screenObservation.base64_image) && (
+                  <div className="relative rounded-lg overflow-hidden border border-slate-800 max-h-72 flex justify-center bg-black/80">
+                    <img
+                      src={`data:image/png;base64,${
+                        screenObservation.som_base64_image || screenObservation.base64_image
+                      }`}
+                      alt="Grounding Snapshot"
+                      className="max-h-72 w-auto object-contain rounded"
+                    />
+                    <span className="absolute bottom-2 right-2 text-[10px] bg-slate-950/80 text-cyan-300 px-2 py-1 rounded font-mono border border-cyan-500/30">
+                      Visual Grounding Feed
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 4. SECTION: AUTONOMOUS SPEED & SAFETY CONTROLS */}
+        {(awarenessSubTab === 'all' || awarenessSubTab === 'control') && (
+          <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800/80 shadow-sm space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                  <Gauge className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-100">Execution Speed & Operator Takeover Guards</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Fine-tune cursor physics, keystroke delays, and automatic safety pause on physical mouse takeover
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Cursor Glide Speed */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
+                <div className="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <MousePointer className="w-3.5 h-3.5 text-cyan-400" />
+                    Mouse Movement Motion
+                  </span>
+                  <span className="text-[10px] text-cyan-400 font-mono uppercase">{controlConfig.cursorGlideSpeed}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'natural', label: 'Natural Curve', desc: 'Curved human-like trajectory' },
+                    { id: 'smooth', label: 'Smooth Linear', desc: 'Direct smooth sweep' },
+                    { id: 'instant', label: 'Instant Jump', desc: 'Sub-millisecond snap' },
+                  ].map((speed) => (
+                    <button
+                      key={speed.id}
+                      type="button"
+                      onClick={() => updateControlConfig('cursorGlideSpeed', speed.id as any)}
+                      className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                        controlConfig.cursorGlideSpeed === speed.id
+                          ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{speed.label}</div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{speed.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Keystroke Delay Slider */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
+                <div className="text-xs font-semibold text-slate-200 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Keyboard className="w-3.5 h-3.5 text-blue-400" />
+                    Keystroke Delay (Typing Cadence)
+                  </span>
+                  <span className="text-[10px] text-cyan-400 font-mono">{controlConfig.keystrokeDelayMs} ms / key</span>
+                </div>
+                <input
+                  type="range"
+                  min="5"
+                  max="120"
+                  step="5"
+                  value={controlConfig.keystrokeDelayMs}
+                  onChange={(e) => updateControlConfig('keystrokeDelayMs', parseInt(e.target.value, 10))}
+                  className="w-full accent-cyan-500 cursor-pointer"
+                />
+                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                  <span>Fast (5ms)</span>
+                  <span>Balanced (35ms)</span>
+                  <span>Human (120ms)</span>
+                </div>
+              </div>
+
+              {/* Physical Takeover Safety Pause */}
+              <div className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 md:col-span-2">
+                <div className="space-y-0.5">
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <PauseCircle className="w-3.5 h-3.5 text-rose-400" />
+                    Physical Mouse Takeover Auto-Pause (Anti-Collision Guard)
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    When you move your real physical mouse, immediately pause autonomous AI movement to prevent fighting for the cursor.
+                  </p>
+                </div>
+                {renderToggle(controlConfig.autoPauseOnUserMouseMove, (val) =>
+                  updateControlConfig('autoPauseOnUserMouseMove', val)
+                )}
+              </div>
+            </div>
+
+            {/* Blacklisted App Windows */}
+            <div className="space-y-2 pt-2 border-t border-slate-800/80">
+              <label className="block text-xs font-semibold text-slate-200">
+                Protected / Blacklisted Windows (Never Automate Or Capture)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newBlacklistApp}
+                  onChange={(e) => setNewBlacklistApp(e.target.value)}
+                  placeholder="App or window title (e.g. 1Password, WhatsApp, Outlook)..."
+                  className="flex-1 bg-slate-950 border border-slate-700 focus:border-cyan-500/60 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddBlacklistApp()}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddBlacklistApp}
+                  disabled={!newBlacklistApp.trim()}
+                  className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Blacklist</span>
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {controlConfig.blacklistedApps.map((app) => (
+                  <span
+                    key={app}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-mono flex items-center gap-1.5"
+                  >
+                    <span>{app}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBlacklistApp(app)}
+                      className="hover:text-rose-100 cursor-pointer"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. SECTION: Computer Control Permissions */}
         {(awarenessSubTab === 'all' || awarenessSubTab === 'control') && (
           <div className="space-y-4">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Computer Control Permissions</span>
+                <span>Operating System Autonomous Tool Permissions</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Configure explicit autonomous action permissions for the agent on this PC.
@@ -329,7 +749,7 @@ export const ComputerAwarenessTab: React.FC = () => {
                   <div>
                     <div className="text-xs font-semibold text-slate-200">Mouse Control</div>
                     <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                      Allows agent to autonomously move mouse cursor, click buttons, double-click, and drag elements on screen.
+                      Allows agent to move cursor, click buttons, double-click, and drag elements on screen.
                     </p>
                   </div>
                 </div>
@@ -359,7 +779,7 @@ export const ComputerAwarenessTab: React.FC = () => {
                   <div>
                     <div className="text-xs font-semibold text-slate-200">Keyboard Control</div>
                     <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                      Allows agent to autonomously type text, press hotkeys (Win, Ctrl, Alt, Enter), and paste clipboard content.
+                      Allows agent to type text, press hotkeys (Win, Ctrl, Alt, Enter), and paste clipboard content.
                     </p>
                   </div>
                 </div>
@@ -389,7 +809,7 @@ export const ComputerAwarenessTab: React.FC = () => {
                   <div>
                     <div className="text-xs font-semibold text-slate-200">Applications Control</div>
                     <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                      Allows agent to launch installed apps directly, bring windows to foreground, switch windows, and close apps.
+                      Allows agent to launch apps directly, bring windows to foreground, switch windows, and close apps.
                     </p>
                   </div>
                 </div>
@@ -468,7 +888,67 @@ export const ComputerAwarenessTab: React.FC = () => {
           </div>
         )}
 
-        {/* 4. SECTION: Installed Apps Explorer */}
+        {/* 6. SECTION: INTERACTIVE OPEN WINDOWS CONTROL */}
+        {(awarenessSubTab === 'all' || awarenessSubTab === 'windows') && (
+          <div className="space-y-4 pt-4 border-t border-slate-800/80">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-purple-400" />
+              <span>Interactive Open Windows Control ({awarenessData?.open_windows_count || 0})</span>
+            </h3>
+
+            <div className="max-h-80 overflow-y-auto custom-scrollbar border border-slate-800/80 rounded-2xl bg-slate-950/40 p-2 space-y-1.5">
+              {!awarenessData?.open_windows || awarenessData.open_windows.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500">
+                  No active desktop GUI windows detected.
+                </div>
+              ) : (
+                awarenessData.open_windows.map((win: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className={`px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                      win.is_active
+                        ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200 shadow-sm'
+                        : 'bg-slate-900/60 border-slate-800/70 text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate font-mono">{win.title}</span>
+                      {win.is_active && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/30 text-cyan-300 shrink-0">
+                          ACTIVE FOCUS
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {!win.is_active && (
+                        <button
+                          type="button"
+                          onClick={() => handleFocusWindow(win.title)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-[10px] font-semibold border border-slate-700 cursor-pointer flex items-center gap-1"
+                          title="Bring to foreground"
+                        >
+                          <ExternalLink className="w-3 h-3 text-cyan-400" />
+                          <span>Focus</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleCloseWindow(win.title)}
+                        className="p-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 rounded-lg text-[10px] border border-rose-500/30 cursor-pointer"
+                        title="Close window"
+                      >
+                        <XSquare className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 7. SECTION: INSTALLED APPS EXPLORER WITH 1-CLICK LAUNCH */}
         {(awarenessSubTab === 'all' || awarenessSubTab === 'apps') && (
           <div className="space-y-4 pt-4 border-t border-slate-800/80">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -478,7 +958,7 @@ export const ComputerAwarenessTab: React.FC = () => {
                   <span>Installed Applications ({awarenessData?.installed_apps_count || 0})</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Discovered software on this machine via Windows Registry and Start Menu shortcuts.
+                  Launch apps directly or allow the autonomous agent to control them
                 </p>
               </div>
 
@@ -525,9 +1005,18 @@ export const ComputerAwarenessTab: React.FC = () => {
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
-                        {app.source === 'registry' ? 'Registry' : 'Start Menu'}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleLaunchApp(app.name)}
+                          className="px-2.5 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 rounded-lg text-[10px] font-semibold cursor-pointer transition-all"
+                        >
+                          Launch
+                        </button>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                          {app.source === 'registry' ? 'Registry' : 'Start Menu'}
+                        </span>
+                      </div>
                     </div>
                   ))
               )}
@@ -535,75 +1024,40 @@ export const ComputerAwarenessTab: React.FC = () => {
           </div>
         )}
 
-        {/* 5. SECTION: Running Apps & Open Windows */}
-        {(awarenessSubTab === 'all' || awarenessSubTab === 'running' || awarenessSubTab === 'windows') && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-4 border-t border-slate-800/80">
-            {/* Open Windows */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-purple-400" />
-                <span>Open Windows ({awarenessData?.open_windows_count || 0})</span>
-              </h3>
-              <div className="max-h-72 overflow-y-auto custom-scrollbar border border-slate-800/80 rounded-2xl bg-slate-950/40 p-2 space-y-1.5">
-                {!awarenessData?.open_windows || awarenessData.open_windows.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-500">
-                    No active desktop GUI windows detected.
-                  </div>
-                ) : (
-                  awarenessData.open_windows.map((win: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-3 ${
-                        win.is_active
-                          ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-200'
-                          : 'bg-slate-900/60 border-slate-800/70 text-slate-300'
-                      }`}
-                    >
-                      <span className="truncate font-mono">{win.title}</span>
-                      {win.is_active && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/30 text-cyan-300 shrink-0">
-                          ACTIVE
-                        </span>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+        {/* 8. SECTION: Running Processes */}
+        {(awarenessSubTab === 'all' || awarenessSubTab === 'running') && (
+          <div className="space-y-4 pt-4 border-t border-slate-800/80">
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Activity className="w-4 h-4 text-blue-400" />
+              <span>Running Apps / Processes ({awarenessData?.running_apps_count || 0})</span>
+            </h3>
 
-            {/* Running Processes */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Activity className="w-4 h-4 text-blue-400" />
-                <span>Running Apps / Processes ({awarenessData?.running_apps_count || 0})</span>
-              </h3>
-              <div className="max-h-72 overflow-y-auto custom-scrollbar border border-slate-800/80 rounded-2xl bg-slate-950/40 p-2 space-y-1.5">
-                {!awarenessData?.running_apps || awarenessData.running_apps.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-500">
-                    {isLoadingAwareness ? 'Scanning processes...' : 'No running process data.'}
-                  </div>
-                ) : (
-                  awarenessData.running_apps.slice(0, 30).map((proc: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className="px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800/70 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-2 truncate">
-                        <span className="font-mono text-slate-200 truncate">{proc.name}</span>
-                        <span className="text-[10px] font-mono text-slate-500">PID:{proc.pid}</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-400">
-                        {proc.memory_percent}% RAM
-                      </span>
+            <div className="max-h-72 overflow-y-auto custom-scrollbar border border-slate-800/80 rounded-2xl bg-slate-950/40 p-2 space-y-1.5">
+              {!awarenessData?.running_apps || awarenessData.running_apps.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500">
+                  {isLoadingAwareness ? 'Scanning processes...' : 'No running process data.'}
+                </div>
+              ) : (
+                awarenessData.running_apps.slice(0, 40).map((proc: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className="px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800/70 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-mono text-slate-200 truncate">{proc.name}</span>
+                      <span className="text-[10px] font-mono text-slate-500">PID:{proc.pid}</span>
                     </div>
-                  ))
-                )}
-              </div>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {proc.memory_percent}% RAM
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}
 
-        {/* 6. SECTION: Files & Drives */}
+        {/* 9. SECTION: Files & Drives */}
         {(awarenessSubTab === 'all' || awarenessSubTab === 'files') && (
           <div className="space-y-4 pt-4 border-t border-slate-800/80">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -664,7 +1118,7 @@ export const ComputerAwarenessTab: React.FC = () => {
           </div>
         )}
 
-        {/* 7. SECTION: System Diagnostics & Hardware */}
+        {/* 10. SECTION: System Diagnostics & Hardware */}
         {(awarenessSubTab === 'all' || awarenessSubTab === 'sysinfo') && (
           <div className="space-y-4 pt-4 border-t border-slate-800/80">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">

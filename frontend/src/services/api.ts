@@ -152,6 +152,7 @@ export const api = {
     onChunk?: (chunk: string) => void,
     onStart?: (convId: string) => void,
     onDone?: (convId: string, fullText: string) => void,
+    signal?: AbortSignal,
   ): Promise<string> {
     const formData = new FormData();
     formData.append('message', message);
@@ -172,6 +173,7 @@ export const api = {
       method: 'POST',
       headers,
       body: formData,
+      signal,
     });
 
     if (!response.ok) {
@@ -231,21 +233,31 @@ export const api = {
     return data;
   },
 
-  async listConversations(page = 1, pageSize = 0): Promise<{
+  async listConversations(page = 1, pageSize = 25, query?: string): Promise<{
     conversations: ConversationSummary[];
     total: number;
     page: number;
     page_size: number;
   }> {
-    const { data } = await apiClient.get('/conversations', {
-      params: { page, page_size: pageSize },
-    });
+    const params: Record<string, any> = { page, page_size: pageSize };
+    if (query && query.trim()) {
+      params.query = query.trim();
+    }
+    const { data } = await apiClient.get('/conversations', { params });
     return data;
   },
 
   async getConversation(conversationId: string): Promise<ConversationDetail> {
     const { data } = await apiClient.get<ConversationDetail>(`/conversations/${encodeURIComponent(conversationId)}`);
     return data;
+  },
+
+  async exportConversation(conversationId: string, format: 'markdown' | 'json' | 'text' = 'markdown'): Promise<Blob> {
+    const response = await apiClient.get(`/conversations/${encodeURIComponent(conversationId)}/export`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    return response.data;
   },
 
   async getConversationOverview(conversationId: string): Promise<{ overview: string }> {
@@ -424,6 +436,7 @@ export const api = {
     onStart?: (convId: string, isTask: boolean) => void,
     onAck?: (text: string) => void,
     onDone?: (result: { conversation_id: string; narration: string; is_task: boolean; status: string; history?: any[]; steps_executed?: number }) => void,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     const { data: { session } } = await supabase.auth.getSession();
     const headers: Record<string, string> = {
@@ -434,6 +447,7 @@ export const api = {
     }
 
     const executeClientFallback = (promptGoal: string) => {
+      if (abortSignal?.aborted) return;
       const lower = promptGoal.toLowerCase().trim();
       let fallbackText = "I am ready and listening. Please let me know what desktop task or question I can assist you with.";
       let isTask = false;
@@ -474,6 +488,7 @@ export const api = {
       const response = await fetch(`${API_BASE}/computer-use/stream`, {
         method: 'POST',
         headers,
+        signal: abortSignal,
         body: JSON.stringify({
           goal,
           max_steps: maxSteps,
@@ -516,14 +531,19 @@ export const api = {
       let buffer = '';
 
       while (true) {
+        if (abortSignal?.aborted) {
+          try { reader.cancel(); } catch { /* ignore */ }
+          return;
+        }
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done || abortSignal?.aborted) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
+          if (abortSignal?.aborted) return;
           const trimmed = line.trim();
           if (!trimmed.startsWith('data:')) continue;
           try {
@@ -544,7 +564,11 @@ export const api = {
           }
         }
       }
-    } catch (netErr) {
+    } catch (netErr: any) {
+      if (netErr?.name === 'AbortError' || abortSignal?.aborted) {
+        // Intentionally aborted on user interrupt — do not trigger client fallback
+        return;
+      }
       console.warn('[api] Network error during stream, engaging client fallback:', netErr);
       executeClientFallback(goal);
     }

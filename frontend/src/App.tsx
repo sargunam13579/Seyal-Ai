@@ -6,17 +6,19 @@ import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { ConfirmationModal } from './components/common/ConfirmationModal';
 import { ConvoComputerUseAgentView } from './components/convo_computer_use_agent';
-import { SystemControlView } from './components/views/SystemControlView';
-import { ApplicationsView } from './components/views/ApplicationsView';
 import { HeroAgentLogoOrb } from './components/convo_computer_use_agent/HeroAgentLogoOrb';
-import { FilesView } from './components/views/FilesView';
-import { DevicesView } from './components/views/DevicesView';
-import { AutomationsView } from './components/views/AutomationsView';
-import { ActivityView } from './components/views/ActivityView';
+
+// Lazy-load secondary views for code-splitting and faster initial bundle startup
+const SystemControlView = React.lazy(() => import('./components/views/SystemControlView').then(m => ({ default: m.SystemControlView })));
+const ApplicationsView = React.lazy(() => import('./components/views/ApplicationsView').then(m => ({ default: m.ApplicationsView })));
+const FilesView = React.lazy(() => import('./components/views/FilesView').then(m => ({ default: m.FilesView })));
+const DevicesView = React.lazy(() => import('./components/views/DevicesView').then(m => ({ default: m.DevicesView })));
+const AutomationsView = React.lazy(() => import('./components/views/AutomationsView').then(m => ({ default: m.AutomationsView })));
+const ActivityView = React.lazy(() => import('./components/views/ActivityView').then(m => ({ default: m.ActivityView })));
 import { SettingsView } from './components/views/SettingsView';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { LoginPage } from './components/auth/LoginPage';
-import { ProfileSetupPage } from './components/auth/ProfileSetupPage';
+const LoginPage = React.lazy(() => import('./components/auth/LoginPage').then(m => ({ default: m.LoginPage })));
+const ProfileSetupPage = React.lazy(() => import('./components/auth/ProfileSetupPage').then(m => ({ default: m.ProfileSetupPage })));
 import { api } from './services/api';
 import type { MessageItem } from './types';
 
@@ -46,10 +48,23 @@ const MainContent: React.FC = () => {
   const welcomeExecutedRef = useRef<boolean>(false);
 
   const activeConversationIdRef = useRef<string | null>(activeConversationId);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
   }, [activeConversationId]);
 
+  useEffect(() => {
+    const handleAbort = () => {
+      if (streamAbortControllerRef.current) {
+        streamAbortControllerRef.current.abort();
+        streamAbortControllerRef.current = null;
+        setProcessing(false);
+      }
+    };
+    window.addEventListener('seyal_abort_stream', handleAbort);
+    return () => window.removeEventListener('seyal_abort_stream', handleAbort);
+  }, [setProcessing]);
 
   // Central sendUserMessage for global voice / chat processing
   const sendUserMessage = async (messageText: string, source: 'voice' | 'chat' = 'voice', files: File[] = []) => {
@@ -61,7 +76,13 @@ const MainContent: React.FC = () => {
     const turnId = getNextTurnId();
     console.log(`[USER TURN START] turnId=${turnId} source=${source} text="${query}"`);
 
-    // 2. Cancel any active TTS speech immediately
+    // 2. Cancel any active stream & TTS speech immediately
+    if (streamAbortControllerRef.current) {
+      streamAbortControllerRef.current.abort();
+    }
+    const currentAbortController = new AbortController();
+    streamAbortControllerRef.current = currentAbortController;
+
     cancelCurrentSpeech(`user_${source}_input`);
     console.log(`[TTS CANCELLED] turnId=${turnId}`);
     setProcessing(true);
@@ -134,11 +155,18 @@ const MainContent: React.FC = () => {
             activeConversationIdRef.current = completedConvId;
             refreshConversations();
           }
-        }
+        },
+        currentAbortController.signal
       );
 
       setProcessing(false);
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        console.log(`[STREAM ABORTED BY USER] turnId=${turnId}`);
+        setProcessing(false);
+        return;
+      }
+
       if (turnId !== getCurrentTurnId()) {
         console.warn(`[STALE RESPONSE IGNORED ON ERROR] id=${turnId}`);
         return;
@@ -181,12 +209,11 @@ const MainContent: React.FC = () => {
     welcomeExecutedRef.current = true;
   }, [isBackendConnected, isLoading]);
 
-  const renderView = () => {
+  const isMainWorkspace =
+    activeView === 'assistant' || activeView === 'computer_use' || activeView === 'dashboard';
+
+  const renderSecondaryView = () => {
     switch (activeView) {
-      case 'dashboard':
-      case 'assistant':
-      case 'computer_use':
-        return <ConvoComputerUseAgentView />;
       case 'system':
         return <SystemControlView />;
       case 'applications':
@@ -202,7 +229,7 @@ const MainContent: React.FC = () => {
       case 'settings':
         return <SettingsView />;
       default:
-        return <ConvoComputerUseAgentView />;
+        return null;
     }
   };
 
@@ -225,21 +252,40 @@ const MainContent: React.FC = () => {
       {/* Main OS Body: Sidebar + Active View Workspace */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <Sidebar onSelectPrompt={(prompt) => sendUserMessage(prompt, 'chat')} />
-        <main className={`flex-1 min-h-0 overflow-y-auto ${activeView === 'assistant' || activeView === 'computer_use' || activeView === 'settings' ? 'p-0' : 'p-4 md:p-6 lg:p-7'}`}>
-          {/* Back arrow — shown on secondary views (for convo agent settings, back button is embedded inside the search bar) */}
-          {activeView !== 'assistant' && activeView !== 'computer_use' && activeView !== 'settings' && (
-            <button
-              onClick={() => setActiveView('assistant')}
-              className="mb-4 flex items-center gap-2 text-slate-400 hover:text-cyan-300 transition-colors group"
-              title="Back to Agent"
-            >
-              <span className="w-7 h-7 rounded-lg bg-slate-900/80 border border-slate-700/70 hover:border-cyan-500/50 flex items-center justify-center transition-colors group-hover:bg-slate-800">
-                <ArrowLeft className="w-4 h-4" />
-              </span>
-              <span className="text-xs font-medium tracking-wide">Back</span>
-            </button>
+        <main className="flex-1 min-h-0 overflow-hidden relative flex flex-col">
+          {/* Main Agent Workspace: Always kept alive in background to preserve continuous voice, speaking & desktop agent tasks */}
+          <div className={`h-full w-full flex-col min-h-0 ${isMainWorkspace ? 'flex' : 'hidden'}`}>
+            <ConvoComputerUseAgentView />
+          </div>
+
+          {/* Dedicated Instant Settings Workspace: Kept alive to eliminate loading latency and retain active tab state */}
+          <div className={`h-full w-full min-h-0 ${activeView === 'settings' ? 'flex' : 'hidden'}`}>
+            <SettingsView />
+          </div>
+
+          {/* Secondary Views (Files, Applications, Devices, etc.) */}
+          {!isMainWorkspace && activeView !== 'settings' && (
+            <div className="h-full w-full overflow-y-auto p-4 md:p-6 lg:p-7">
+              <button
+                onClick={() => setActiveView('assistant')}
+                className="mb-4 flex items-center gap-2 text-slate-400 hover:text-cyan-300 transition-colors group"
+                title="Back to Agent"
+              >
+                <span className="w-7 h-7 rounded-lg bg-slate-900/80 border border-slate-700/70 hover:border-cyan-500/50 flex items-center justify-center transition-colors group-hover:bg-slate-800">
+                  <ArrowLeft className="w-4 h-4" />
+                </span>
+                <span className="text-xs font-medium tracking-wide">Back</span>
+              </button>
+              <React.Suspense fallback={
+                <div className="flex h-full w-full items-center justify-center text-slate-500 text-xs font-mono">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping mr-2" />
+                  Loading view...
+                </div>
+              }>
+                {renderSecondaryView()}
+              </React.Suspense>
+            </div>
           )}
-          {renderView()}
         </main>
       </div>
 
@@ -325,14 +371,20 @@ const AuthenticatedApp: React.FC = () => {
   }, [userId, session]);
 
   if (!session) {
-    return <LoginPage />;
+    return (
+      <React.Suspense fallback={<div className="min-h-screen bg-[#070b14] flex items-center justify-center text-cyan-400 font-mono text-xs animate-pulse">Loading Seyal AI...</div>}>
+        <LoginPage />
+      </React.Suspense>
+    );
   }
 
   if (profileSetupRequired) {
     return (
-      <ProfileSetupPage
-        onComplete={() => setProfileSetupRequired(false)}
-      />
+      <React.Suspense fallback={<div className="min-h-screen bg-[#070b14] flex items-center justify-center text-cyan-400 font-mono text-xs animate-pulse">Loading setup...</div>}>
+        <ProfileSetupPage
+          onComplete={() => setProfileSetupRequired(false)}
+        />
+      </React.Suspense>
     );
   }
 

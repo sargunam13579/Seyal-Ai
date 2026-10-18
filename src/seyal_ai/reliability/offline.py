@@ -123,11 +123,29 @@ class OfflineModeManager:
         )
 
     def _set_volume_local(self, volume: int) -> LocalCommandResult:
-        """Adjust system volume locally."""
+        """Adjust system volume locally on Windows."""
         try:
             if os.name == "nt":
-                # Set approximated volume or log
-                log.info("Offline setting volume to %d%%", volume)
+                import ctypes
+                user32 = ctypes.windll.user32
+                VK_VOLUME_MUTE = 0xAD
+                VK_VOLUME_DOWN = 0xAE
+                VK_VOLUME_UP = 0xAF
+                KEYEVENTF_KEYUP = 0x0002
+
+                if volume == 0:
+                    user32.keybd_event(VK_VOLUME_MUTE, 0, 0, 0)
+                    user32.keybd_event(VK_VOLUME_MUTE, 0, KEYEVENTF_KEYUP, 0)
+                else:
+                    # Bring to 0 first (50 down-steps) then step up to target
+                    for _ in range(50):
+                        user32.keybd_event(VK_VOLUME_DOWN, 0, 0, 0)
+                        user32.keybd_event(VK_VOLUME_DOWN, 0, KEYEVENTF_KEYUP, 0)
+                    steps = max(0, min(50, round(volume / 2)))
+                    for _ in range(steps):
+                        user32.keybd_event(VK_VOLUME_UP, 0, 0, 0)
+                        user32.keybd_event(VK_VOLUME_UP, 0, KEYEVENTF_KEYUP, 0)
+
             return LocalCommandResult(
                 success=True,
                 response_text=f"Volume set to {volume} percent.",

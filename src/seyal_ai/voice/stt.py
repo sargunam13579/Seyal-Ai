@@ -170,6 +170,7 @@ class BaseSTTProvider(ABC):
         audio_data: np.ndarray,
         sample_rate: int = 16000,
         language: str = "auto",
+        fast_interim: bool = False,
     ) -> TranscriptionResult:
         """Transcribe audio and return both text and detected language."""
         text = await self.transcribe(audio_data, sample_rate, language)
@@ -225,12 +226,15 @@ class GeminiMultilingualSTTProvider(BaseSTTProvider):
         audio_data: np.ndarray,
         sample_rate: int = 16000,
         language: str = "auto",
+        fast_interim: bool = False,
     ) -> TranscriptionResult:
         import time
 
         if time.time() < GeminiMultilingualSTTProvider._quota_cooldown_until:
             fallback = GoogleWebSTTProvider()
-            return await fallback.transcribe_with_language(audio_data, sample_rate, language)
+            return await fallback.transcribe_with_language(
+                audio_data, sample_rate, language, fast_interim=fast_interim
+            )
 
         try:
             client = self._ensure_client()
@@ -322,6 +326,7 @@ class GoogleWebSTTProvider(BaseSTTProvider):
         audio_data: np.ndarray,
         sample_rate: int = 16000,
         language: str = "auto",
+        fast_interim: bool = False,
     ) -> TranscriptionResult:
         try:
             import speech_recognition as sr
@@ -351,6 +356,12 @@ class GoogleWebSTTProvider(BaseSTTProvider):
                 text = ""
             except sr.RequestError as e:
                 raise STTError(f"Google Web Speech API error: {e}") from e
+
+            # If fast interim requested, return immediately without fallback delay
+            if fast_interim:
+                text = sanitize_transcribed_text(text)
+                lang = detect_text_language(text)
+                return TranscriptionResult(text=text, language=lang)
 
             # If empty or repetitive single-word hallucination, try fallback language
             words = text.split()
@@ -513,6 +524,7 @@ class STTEngine:
         audio_data: np.ndarray,
         sample_rate: int = 16000,
         language: str | None = None,
+        fast_interim: bool = False,
     ) -> TranscriptionResult:
         """Transcribe audio and return both transcribed text and detected language."""
         if self._provider is None:
@@ -523,7 +535,9 @@ class STTEngine:
         lang = language or self._language or "auto"
 
         try:
-            return await self._provider.transcribe_with_language(audio_data, sample_rate, lang)
+            return await self._provider.transcribe_with_language(
+                audio_data, sample_rate, lang, fast_interim=fast_interim
+            )
         except STTError:
             raise
         except Exception as e:

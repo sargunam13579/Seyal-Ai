@@ -44,8 +44,11 @@ class CustomCommandManager:
             self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._commands: dict[str, CustomCommand] = {}
-        self._load_defaults()
-        self._load()
+        if not self.storage_path.exists():
+            self._load_defaults()
+            self._save()
+        else:
+            self._load()
 
     def _load_defaults(self) -> None:
         """Seed initial helpful accessibility voice macros."""
@@ -78,6 +81,7 @@ class CustomCommandManager:
             if not raw.strip():
                 return
             data = json.loads(raw)
+            self._commands.clear()
             for item in data.get("commands", []):
                 cmd = CustomCommand(**item)
                 self._commands[cmd.phrase.lower()] = cmd

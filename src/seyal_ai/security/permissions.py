@@ -95,6 +95,18 @@ _TOOL_SCOPE_MAP: dict[str, PermissionScope] = {
     "click_element": PermissionScope.ACCESSIBILITY,
     "type_text": PermissionScope.ACCESSIBILITY,
     "press_hotkey": PermissionScope.ACCESSIBILITY,
+    "execute_command": PermissionScope.DEVICE_CONTROL,
+    "terminal_execute": PermissionScope.DEVICE_CONTROL,
+    "mouse_click": PermissionScope.MOUSE_CONTROL,
+    "mouse_move": PermissionScope.MOUSE_CONTROL,
+    "mouse_drag": PermissionScope.MOUSE_CONTROL,
+    "mouse_scroll": PermissionScope.MOUSE_CONTROL,
+    "key_press": PermissionScope.KEYBOARD_CONTROL,
+    "hotkey": PermissionScope.KEYBOARD_CONTROL,
+    "open_app": PermissionScope.APP_CONTROL,
+    "focus_window": PermissionScope.APP_CONTROL,
+    "close_app": PermissionScope.APP_CONTROL,
+    "delete_file": PermissionScope.FILE_OPERATIONS,
     "android_adb": PermissionScope.DEVICE_CONTROL,
     "transfer_file": PermissionScope.DEVICE_CONTROL,
     "launch_app": PermissionScope.DEVICE_CONTROL,
@@ -200,9 +212,20 @@ class PermissionScopeManager:
     def is_tool_allowed(self, tool_name: str) -> bool:
         """Check if a tool's required capability scope is granted."""
         scope = _TOOL_SCOPE_MAP.get(tool_name)
-        if scope is None:
-            return True
-        return self.is_scope_granted(scope)
+        if scope is not None:
+            return self.is_scope_granted(scope)
+
+        # For unmapped or dynamic MCP tools: check for capability-requiring action verbs
+        t_lower = tool_name.lower()
+        if any(v in t_lower for v in ("cmd", "exec", "terminal", "shell", "powershell", "bash", "run")):
+            return self.is_scope_granted(PermissionScope.DEVICE_CONTROL)
+        if any(v in t_lower for v in ("write", "delete", "remove", "drop", "overwrite", "modify", "rm")):
+            return self.is_scope_granted(PermissionScope.FILE_OPERATIONS)
+        if any(v in t_lower for v in ("click", "type", "mouse", "keyboard", "hotkey", "press")):
+            return self.is_scope_granted(PermissionScope.ACCESSIBILITY)
+
+        # Benign read-only or unprivileged queries are allowed
+        return True
 
     def set_mode(self, scope: PermissionScope | str, mode: str) -> None:
         """Set 3-way mode for a scope: 'allow', 'ask', 'block'."""
@@ -327,3 +350,32 @@ class PermissionEngine:
     def requires_confirmation(self, tool_name: str, risk_level: RiskLevel) -> bool:
         """Check if this tool needs user confirmation."""
         return self.check_permission(tool_name, risk_level) == PermissionAction.CONFIRM
+
+    def get_scope_status(self, scope: PermissionScope | str) -> ScopeStatus | None:
+        return self._scope_manager.get_scope_status(scope)
+
+    def is_scope_granted(self, scope: PermissionScope | str) -> bool:
+        return self._scope_manager.is_scope_granted(scope)
+
+    def set_mode(self, scope: PermissionScope | str, mode: str) -> None:
+        self._scope_manager.set_mode(scope, mode)
+
+    def grant_scope(self, scope: PermissionScope | str) -> None:
+        self._scope_manager.grant_scope(scope)
+
+    def revoke_scope(self, scope: PermissionScope | str) -> None:
+        self._scope_manager.revoke_scope(scope)
+
+    def record_access(self, scope: PermissionScope | str, accessor: str = "System Action") -> None:
+        self._scope_manager.record_access(scope, accessor)
+
+
+_permission_engine_instance: PermissionEngine | None = None
+
+
+def get_permission_engine() -> PermissionEngine:
+    """Get the global singleton PermissionEngine instance."""
+    global _permission_engine_instance
+    if _permission_engine_instance is None:
+        _permission_engine_instance = PermissionEngine()
+    return _permission_engine_instance

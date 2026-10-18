@@ -130,10 +130,15 @@ async def init_engine(
     from seyal_ai.database.models import Base
 
     async with _engine.begin() as conn:
+        if "sqlite" in resolved_local_url:
+            from sqlalchemy import text
+            await conn.execute(text("PRAGMA journal_mode=WAL;"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+            await conn.execute(text("PRAGMA busy_timeout=5000;"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_auto_migrate_sqlite_schema)
 
-    log.info("Local database initialized successfully (Instant Local-First ready)")
+    log.info("Local database initialized successfully (Instant Local-First ready, WAL mode active)")
 
     # 2. Configure Cloud Engine (Supabase - Background Sync)
     if target_cloud_url:

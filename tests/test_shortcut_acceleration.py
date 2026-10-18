@@ -3,13 +3,15 @@ Unit tests for Universal Multilingual Shortcut-First Acceleration & Intelligent 
 """
 
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
+
+from seyal_ai.agents.computer_use.protocol import ActionType
 from seyal_ai.agents.computer_use.shortcuts import (
     detect_fast_shortcut,
     is_explicit_mouse_request,
     resolve_universal_shortcut,
 )
-from seyal_ai.agents.computer_use.protocol import ActionType
 from seyal_ai.llm.providers.base import LLMResponse
 
 

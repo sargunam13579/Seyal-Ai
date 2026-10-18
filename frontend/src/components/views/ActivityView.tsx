@@ -7,11 +7,14 @@ import type { ActivityEvent } from '../../types';
 export const ActivityView: React.FC = () => {
   const { activities } = useSeyalAi();
   const [filterType, setFilterType] = useState<string>('all');
+  const [visibleCount, setVisibleCount] = useState<number>(30);
 
   const filtered = activities.filter((act) => {
     if (filterType === 'all') return true;
     return act.type === filterType;
   });
+
+  const displayedActivities = filtered.slice(0, visibleCount);
 
   const getStatusIcon = (status: ActivityEvent['status']) => {
     switch (status) {
@@ -46,7 +49,10 @@ export const ActivityView: React.FC = () => {
             <button
               key={type}
               type="button"
-              onClick={() => setFilterType(type)}
+              onClick={() => {
+                setFilterType(type);
+                setVisibleCount(30);
+              }}
               className={`px-3 py-1 rounded uppercase tracking-wider transition-colors ${
                 filterType === type
                   ? 'bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/40'
@@ -61,14 +67,15 @@ export const ActivityView: React.FC = () => {
 
       <GlassCard glow corners className="p-5">
         <div className="space-y-3">
-          {filtered.length === 0 ? (
+          {displayedActivities.length === 0 ? (
             <div className="py-12 text-center text-slate-500 font-tech text-sm">
               No activity logged in the current operational session yet.
             </div>
           ) : (
-            filtered.map((act) => (
+            displayedActivities.map((act) => (
               <div
                 key={act.id}
+                style={{ contentVisibility: 'auto', containIntrinsicSize: '0 64px' }}
                 className="p-3.5 rounded-lg bg-slate-900/70 border border-slate-800/80 flex items-start gap-3.5 transition-all hover:border-slate-700"
               >
                 <div className="p-1.5 rounded bg-slate-950 border border-slate-800 shrink-0 mt-0.5">
@@ -91,6 +98,19 @@ export const ActivityView: React.FC = () => {
                 </div>
               </div>
             ))
+          )}
+
+          {/* Load More Button for older events */}
+          {filtered.length > visibleCount && (
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((prev) => prev + 30)}
+                className="px-4 py-2 rounded-xl bg-slate-900 border border-cyan-500/30 hover:border-cyan-400 text-xs font-mono text-cyan-300 hover:text-white transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-sm"
+              >
+                + Load older activity events ({filtered.length - visibleCount} more)
+              </button>
+            </div>
           )}
         </div>
       </GlassCard>

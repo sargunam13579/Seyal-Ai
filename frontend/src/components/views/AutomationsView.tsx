@@ -28,17 +28,25 @@ export const AutomationsView: React.FC = () => {
     },
   ];
 
-  const handleRunAutomation = async (customGoal?: string) => {
+  const handleRunAutomation = async (customGoal?: string, presetSteps?: string[]) => {
     const goal = (customGoal || goalText).trim();
     if (!goal) return;
 
     setIsExecuting(true);
-    setCurrentPlan([
-      `Decomposing goal: "${goal}"`,
-      'Evaluating dependencies and authorized tool scopes...',
-      'Executing plan steps with verification...',
-      'Validating final step outcomes...',
-    ]);
+    if (presetSteps && presetSteps.length > 0) {
+      setCurrentPlan([
+        `Goal: "${goal}"`,
+        `Decomposed Workflow Steps (${presetSteps.length}):`,
+        ...presetSteps.map((s, i) => `  [Step ${i + 1}] ${s}`),
+        'Orchestrating verified tool execution...',
+      ]);
+    } else {
+      setCurrentPlan([
+        `Goal: "${goal}"`,
+        'Analyzing objective and evaluating required tools...',
+        'Dispatched to Seyal AI autonomous planner...',
+      ]);
+    }
 
     addActivity({
       type: 'tool_exec',
@@ -48,7 +56,6 @@ export const AutomationsView: React.FC = () => {
     });
 
     try {
-      // Send directly to the brain chat endpoint which activates planner and tools
       const res = await api.sendMessage(`Please plan and execute this task: ${goal}`);
       setCurrentPlan((prev) => [
         ...(prev || []),
@@ -125,7 +132,7 @@ export const AutomationsView: React.FC = () => {
                   key={idx}
                   onClick={() => {
                     setGoalText(wf.title);
-                    handleRunAutomation(wf.title);
+                    handleRunAutomation(wf.title, wf.steps);
                   }}
                   className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-cyan-400/40 cursor-pointer transition-all space-y-1 group"
                 >

@@ -173,7 +173,8 @@ class DatabaseSyncManager:
         if not outbox_items:
             return
 
-        log.info("Immediate Reconnect: Pushing %d offline items to Supabase (one by one)...", len(outbox_items))
+        log.info("Immediate Reconnect: Pushing %d offline items to Supabase...", len(outbox_items))
+        successful_ids: list[str] = []
         async with get_cloud_session() as cloud_session:
             for item in outbox_items:
                 try:
@@ -201,14 +202,20 @@ class DatabaseSyncManager:
                                 c.summary = item.payload.get("summary")
                                 await cloud_session.flush()
 
-                    # Remove from outbox immediately after this single item is stored
-                    async with get_session() as local_session:
-                        await local_session.execute(
-                            delete(SyncOutbox).where(SyncOutbox.id == item.id)
-                        )
+                    successful_ids.append(item.id)
                 except Exception as err:
                     log.warning("Failed to store outbox item %s to Supabase: %s", item.id, err)
                     await cloud_session.rollback()
+
+        # Batch delete successfully synchronized items in a single SQLite transaction
+        if successful_ids:
+            try:
+                async with get_session() as local_session:
+                    await local_session.execute(
+                        delete(SyncOutbox).where(SyncOutbox.id.in_(successful_ids))
+                    )
+            except Exception as batch_err:
+                log.warning("Could not batch prune outbox items: %s", batch_err)
 
     async def _sync_users_and_sessions(self) -> None:
         """Ensure users and sessions are present in cloud database."""
@@ -276,15 +283,9 @@ class DatabaseSyncManager:
                 len(local_ids), len(cloud_ids), len(missing_in_cloud), len(extra_in_cloud)
             )
 
-            # 1. Update summaries on Supabase one by one if changed
+            # 1. Update summaries and push missing/new messages on Supabase for common conversations
             for conv_id in common_ids:
-                if local_dict[conv_id] != cloud_dict[conv_id]:
-                    c_obj = (await cloud_session.execute(
-                        select(Conversation).where(Conversation.id == conv_id)
-                    )).scalar_one_or_none()
-                    if c_obj:
-                        c_obj.summary = local_dict[conv_id]
-                        await cloud_session.flush()
+                await self._push_single_conversation_to_cloud(conv_id, cloud_session)
 
             # 2. Push missing conversations to Supabase (one by one)
             for conv_id in missing_in_cloud:
@@ -347,8 +348,33 @@ class DatabaseSyncManager:
                         role=m.role,
                         content=m.content,
                         timestamp=m.timestamp,
+                        model_used=getattr(m, "model_used", None),
+                        latency_ms=getattr(m, "latency_ms", None),
                     )
                     cloud_session.add(cloud_m)
+                    await cloud_session.flush()
+
+                    for tc in (getattr(m, "tool_calls", []) or []):
+                        cloud_tc = ToolCall(
+                            id=tc.id,
+                            message_id=m.id,
+                            tool_name=tc.tool_name,
+                            parameters=tc.parameters or {},
+                            risk_level=tc.risk_level,
+                            status=tc.status,
+                            completed_at=tc.completed_at,
+                        )
+                        cloud_session.add(cloud_tc)
+                        await cloud_session.flush()
+                        for tr in (getattr(tc, "results", []) or []):
+                            cloud_tr = ToolResult(
+                                id=tr.id,
+                                tool_call_id=tc.id,
+                                success=tr.success,
+                                result_data=tr.result_data,
+                                error_message=tr.error_message,
+                            )
+                            cloud_session.add(cloud_tr)
 
             await cloud_session.flush()
 

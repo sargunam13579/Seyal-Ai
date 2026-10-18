@@ -95,39 +95,61 @@ class DesktopAppController:
             return None
 
     def focus_app(self, app_name_or_title: str) -> bool:
-        """Bring application matching name or title to the foreground."""
+        """Bring application matching name or title to the foreground reliably on Windows."""
         if not self._is_windows:
             return False
 
         try:
             import ctypes
+            import re
 
             user32 = ctypes.windll.user32
             target_clean = app_name_or_title.lower().strip()
-            matched_hwnd = None
+            candidates: list[tuple[int, int]] = []  # (priority_rank, hwnd)
 
             def enum_proc(hwnd: int, _lparam: int) -> bool:
-                nonlocal matched_hwnd
                 if user32.IsWindowVisible(hwnd):
                     length = user32.GetWindowTextLengthW(hwnd)
                     if length > 0:
                         buff = ctypes.create_unicode_buffer(length + 1)
                         user32.GetWindowTextW(hwnd, buff, length + 1)
-                        title = buff.value.lower()
-                        if target_clean in title:
-                            matched_hwnd = hwnd
-                            return False
+                        title = buff.value.lower().strip()
+                        if title:
+                            if title == target_clean:
+                                candidates.append((0, hwnd))  # Exact match
+                            elif re.search(r"\b" + re.escape(target_clean) + r"\b", title):
+                                candidates.append((1, hwnd))  # Word boundary match
+                            elif title.startswith(target_clean):
+                                candidates.append((2, hwnd))  # Prefix match
+                            elif target_clean in title:
+                                candidates.append((3, hwnd))  # Substring match
                 return True
 
             wnd_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
             user32.EnumWindows(wnd_proc(enum_proc), 0)
 
-            if matched_hwnd:
-                user32.ShowWindow(matched_hwnd, 9)  # SW_RESTORE
-                user32.SetForegroundWindow(matched_hwnd)
-                return True
+            if not candidates:
+                return False
 
-            return False
+            # Sort by priority rank
+            candidates.sort(key=lambda c: c[0])
+            matched_hwnd = candidates[0][1]
+
+            # Bypass Windows Foreground Lock (LSFW_UNLOCK = 2)
+            try:
+                user32.LockSetForegroundWindow(2)
+            except Exception:
+                pass
+
+            # Simulate ALT key to bypass Windows OS SetForegroundWindow restriction
+            VK_MENU = 0x12
+            KEYEVENTF_KEYUP = 0x0002
+            user32.keybd_event(VK_MENU, 0, 0, 0)
+            user32.ShowWindow(matched_hwnd, 9)  # SW_RESTORE
+            user32.BringWindowToTop(matched_hwnd)
+            user32.SetForegroundWindow(matched_hwnd)
+            user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
+            return True
         except Exception as e:
             log.warning("Focusing app '%s' failed: %s", app_name_or_title, e)
             return False

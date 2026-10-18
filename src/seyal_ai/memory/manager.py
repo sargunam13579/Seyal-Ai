@@ -18,16 +18,26 @@ from seyal_ai.utils.logging import get_logger
 
 log = get_logger("memory.manager")
 
-# Patterns to detect explicit preference statements from user input
+# Patterns to detect explicit preference statements from user input (English & Tanglish/Tamil)
 _PREFERENCE_LEARNING_PATTERNS = [
-    # "My Java projects are normally inside D:/Projects"
+    # "My Java projects are normally inside D:/My Projects"
     re.compile(
-        r"my\s+(?P<topic>[a-zA-Z0-9_+]+)\s+(?:projects|files|docs|code)\s+(?:are|is)\s+(?:normally|usually|located|stored)?\s+(?:in|inside|at)\s+(?P<val>[a-zA-Z]:[\\/][^\s]+|/[^\s]+)",
+        r"my\s+(?P<topic>[a-zA-Z0-9_+]+)\s+(?:projects|files|docs|code)\s+(?:are|is)\s+(?:(?:normally|usually|located|stored)\s+)?(?:in|inside|at)\s+(?P<val>(?:[a-zA-Z]:[\\/]|/)[^\r\n]+?)(?:\.|$)",
         re.IGNORECASE,
     ),
     # "Remember that my email is user@example.com"
     re.compile(
         r"(?:remember|save|store)\s+(?:that\s+)?(?:my\s+)?(?P<key>[a-zA-Z0-9_\-\s]{2,30})\s+(?:is|=|as)\s+(?P<val>.+)",
+        re.IGNORECASE,
+    ),
+    # Tanglish: "Enoda email user@example.com nu nyabagam vechiko" or "ennoda phone 9876543210 nu save pannu"
+    re.compile(
+        r"(?:enoda|ennoda|en)\s+(?P<key>[a-zA-Z0-9_\-]{2,30})\s+(?:(?:is|=|nu|ah)\s+)?(?P<val>.+?)(?:\s+nu\s*(?:nyabagam|note|save|store|vechikko|vechiko|vachiko)\b.*|$)",
+        re.IGNORECASE,
+    ),
+    # Tanglish: "nyabagam vechikko that my email is user@example.com" or "note pannu email is user@example.com"
+    re.compile(
+        r"(?:nyabagam\s+vechikko|nyabagam\s+vachiko|note\s+pannu|save\s+pannu)\s+(?:that\s+)?(?:enoda\s+|my\s+)?(?P<key>[a-zA-Z0-9_\-\s]{2,30})\s+(?:is|=|nu|as)\s+(?P<val>.+)",
         re.IGNORECASE,
     ),
     # "Set my default browser to Chrome"
@@ -91,22 +101,23 @@ class MemoryManager:
                 confidence=0.95,
             )
 
-        # 2. Explicit "Remember that X is Y" Pattern
-        match_rem = _PREFERENCE_LEARNING_PATTERNS[1].search(clean_text)
-        if match_rem:
-            key_raw = match_rem.group("key").strip()
-            val_raw = match_rem.group("val").strip().rstrip(".!?")
-            key_clean = re.sub(r"\s+", "_", key_raw).lower()
-            return await self._storage.store(
-                key=key_clean,
-                value=val_raw,
-                category=MemoryCategory.USER_DEFINED_INFO,
-                tags=["user_note", key_clean],
-                confidence=1.0,
-            )
+        # 2. Explicit English and Tanglish Remember/Note Patterns
+        for pat_idx in (1, 2, 3):
+            match_rem = _PREFERENCE_LEARNING_PATTERNS[pat_idx].search(clean_text)
+            if match_rem:
+                key_raw = match_rem.group("key").strip()
+                val_raw = match_rem.group("val").strip().rstrip(".!?")
+                key_clean = re.sub(r"\s+", "_", key_raw).lower()
+                return await self._storage.store(
+                    key=key_clean,
+                    value=val_raw,
+                    category=MemoryCategory.USER_DEFINED_INFO,
+                    tags=["user_note", key_clean],
+                    confidence=1.0,
+                )
 
         # 3. Default App Pattern
-        match_app = _PREFERENCE_LEARNING_PATTERNS[2].search(clean_text)
+        match_app = _PREFERENCE_LEARNING_PATTERNS[4].search(clean_text)
         if match_app:
             app_type = match_app.group("app").strip().lower()
             app_val = match_app.group("val").strip().rstrip(".!?")

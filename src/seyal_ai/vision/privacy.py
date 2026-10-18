@@ -126,7 +126,10 @@ class ScreenPrivacyManager:
         ):
             return True, "Capture permitted."
 
-        return True, "Capture permitted."
+        if self.mode == ScreenPermissionMode.ASK_ALWAYS:
+            return False, "Screen capture requires explicit user confirmation (Mode: ASK_ALWAYS)."
+
+        return False, "Screen capture denied by privacy settings."
 
     def log_capture(
         self,
