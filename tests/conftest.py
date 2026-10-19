@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from pathlib import Path
+
+# Ensure src/ is on sys.path for direct pytest discovery
+src_dir = str(Path(__file__).resolve().parent.parent / "src")
+if src_dir not in sys.path:
+    sys.path.insert(0, src_dir)
 
 import pytest
 import pytest_asyncio

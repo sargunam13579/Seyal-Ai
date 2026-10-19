@@ -402,7 +402,8 @@ def test_seyal_ai_settings_fast_path_queries():
 async def test_agent_executes_settings_voice_action():
     """Verify agent executes voice update action end-to-end with event emission."""
     agent = ConversationalComputerUseAgent()
-    res = await agent.run_goal("change voice to breeze")
+    with patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]):
+        res = await agent.run_goal("change voice to breeze")
 
     assert res["status"] == "completed"
     assert res["is_task"] is True
@@ -414,7 +415,8 @@ async def test_agent_executes_settings_voice_action():
 async def test_agent_executes_settings_permission_action():
     """Verify agent executes permission grant action end-to-end with security update."""
     agent = ConversationalComputerUseAgent()
-    res = await agent.run_goal("keyboard control permission kudu")
+    with patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]):
+        res = await agent.run_goal("keyboard control permission kudu")
 
     assert res["status"] == "completed"
     assert res["is_task"] is True

@@ -119,7 +119,10 @@ async def test_conversational_computer_use_agent_loop():
     await agent.steer("Please make sure to save first")
 
     # Run Goal
-    with patch("pyautogui.click", create=True):
+    with (
+        patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]),
+        patch("pyautogui.click", create=True),
+    ):
         res = await agent.run_goal("Open File menu and save")
         assert res["status"] == "completed"
         assert res["steps_executed"] >= 1
@@ -252,7 +255,14 @@ async def test_computer_use_open_close_loop_detection():
 
     agent._classify_intent = AsyncMock(return_value="TASK")
 
-    with patch("pyautogui.hotkey", create=True), patch("subprocess.Popen", create=True), patch("os.startfile", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True), patch.object(agent._executor, "_open_app", new_callable=AsyncMock, return_value={"action": "open_app", "target": "camera", "success": True}):
+    with (
+        patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]),
+        patch("pyautogui.hotkey", create=True),
+        patch("subprocess.Popen", create=True),
+        patch("os.startfile", create=True),
+        patch.object(agent._executor, "_bring_window_to_foreground", return_value=True),
+        patch.object(agent._executor, "_open_app", new_callable=AsyncMock, return_value={"action": "open_app", "target": "camera", "success": True}),
+    ):
         res = await agent.run_goal("camera open panni close pannu")
         # Should be auto-completed by loop detection on step 3!
         assert res["status"] == "completed"
@@ -299,7 +309,15 @@ async def test_outer_task_keeps_app_open():
             return {"action": "open_app", "target": action.app_name, "success": True}
         return await original_exec(action)
 
-    with patch.object(agent._executor, "execute", side_effect=mock_exec), patch("pyautogui.press", create=True), patch("subprocess.Popen", create=True), patch("os.startfile", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
+    with (
+        patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]),
+        patch("seyal_ai.agents.computer_use.agent.resolve_universal_shortcut", new_callable=AsyncMock, return_value=None),
+        patch.object(agent._executor, "execute", side_effect=mock_exec),
+        patch("pyautogui.press", create=True),
+        patch("subprocess.Popen", create=True),
+        patch("os.startfile", create=True),
+        patch.object(agent._executor, "_bring_window_to_foreground", return_value=True),
+    ):
         res = await agent.run_goal("camera open panni one pic edu")
         assert res["status"] == "completed"
         # Verify that camera was NOT closed automatically (user didn't ask to close)
@@ -346,7 +364,14 @@ async def test_outer_task_explicit_close():
             return {"action": "window_close", "success": True}
         return {"success": True}
 
-    with patch.object(agent._executor, "execute", side_effect=mock_exec), patch("pyautogui.press", create=True), patch("subprocess.Popen", create=True), patch.object(agent._executor, "_bring_window_to_foreground", return_value=True):
+    with (
+        patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]),
+        patch("seyal_ai.agents.computer_use.agent.resolve_universal_shortcut", new_callable=AsyncMock, return_value=None),
+        patch.object(agent._executor, "execute", side_effect=mock_exec),
+        patch("pyautogui.press", create=True),
+        patch("subprocess.Popen", create=True),
+        patch.object(agent._executor, "_bring_window_to_foreground", return_value=True),
+    ):
         res = await agent.run_goal("camera open panni photo eduthutu close pannu")
         assert res["status"] == "completed"
         # Verify window_close was called because user explicitly requested close
@@ -408,7 +433,12 @@ async def test_inner_task_protection_and_subtasks():
             close_calls.append(action.app_name)
         return {"success": True, "action": str(action.action_type)}
 
-    with patch.object(agent._executor, "execute", side_effect=mock_exec), patch("pyautogui.click", create=True):
+    with (
+        patch("seyal_ai.agents.computer_use.agent.decompose_user_intents", side_effect=lambda g, *args, **kw: [g]),
+        patch("seyal_ai.agents.computer_use.agent.resolve_universal_shortcut", new_callable=AsyncMock, return_value=None),
+        patch.object(agent._executor, "execute", side_effect=mock_exec),
+        patch("pyautogui.click", create=True),
+    ):
         res = await agent.run_goal("'hello' and 'hiii' chats ah delete pannu")
         assert res["status"] == "completed"
         assert res["steps_executed"] == 4

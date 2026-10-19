@@ -1187,7 +1187,7 @@ class SeyalAiTelemetryService:
                     timeout=1.2,
                 )
                 result = (synth_res.content or "").strip().replace('"', "")
-                if result and len(result) > 5:
+                if result and len(result) > 5 and not result.startswith("⚠️"):
                     return result
             except Exception as e:
                 log.debug("Dynamic speech synthesis notice: %s", e)
@@ -1233,7 +1233,7 @@ class SeyalAiTelemetryService:
                     timeout=1.2,
                 )
                 result = (synth_res.content or "").strip().replace('"', "")
-                if result and len(result) > 4:
+                if result and len(result) > 4 and not result.startswith("⚠️"):
                     return result
             except Exception as e:
                 log.debug("Action narration synthesis notice: %s", e)
