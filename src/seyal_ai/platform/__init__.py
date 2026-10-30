@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import sys
 
-from seyal_ai.platform import database
-from seyal_ai import llm, memory, security, tools, vision, voice
+from seyal_ai.platform import database, llm
+from seyal_ai import memory, security, tools, vision, voice
 
 __all__ = [
     "llm",
