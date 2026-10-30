@@ -19,9 +19,12 @@ from seyal_ai.platform.memory.types import (
 )
 from seyal_ai.platform.memory.vector_store import (
     SemanticVectorStore,
+    are_embeddings_compatible,
     compute_embedding,
+    compute_embedding_with_model,
     compute_local_embedding,
     cosine_similarity,
+    infer_embedding_model,
 )
 
 __all__ = [
@@ -32,7 +35,10 @@ __all__ = [
     "MemoryPrivacyFilter",
     "MemoryStorage",
     "SemanticVectorStore",
+    "are_embeddings_compatible",
+    "infer_embedding_model",
     "compute_embedding",
+    "compute_embedding_with_model",
     "compute_local_embedding",
     "cosine_similarity",
     "ContextResolver",

@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 log = get_logger("memory.vector_store")
 
 LOCAL_VECTOR_DIM = 256
+LOCAL_EMBEDDING_MODEL = "local_ngram_256"
+GEMINI_VECTOR_DIM = 768
+GEMINI_EMBEDDING_MODEL = "gemini_text_embedding_004"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -64,15 +67,60 @@ def compute_local_embedding(text: str, dim: int = LOCAL_VECTOR_DIM) -> list[floa
         weight = 1.0 + math.log1p(len(token))
         vec[idx] += sign * weight
 
-    norm = np.linalg.norm(vec)
+    norm = float(np.linalg.norm(vec))
     if norm > 1e-6:
         vec = vec / norm
     return vec.tolist()
 
 
-async def compute_embedding(text: str) -> list[float]:
+def infer_embedding_model(embedding: list[float] | None, model_name: str | None = None) -> str | None:
+    """Infer or validate embedding model from explicit name or vector properties."""
+    if model_name:
+        return model_name
+    if not embedding:
+        return None
+    dim = len(embedding)
+    if dim == LOCAL_VECTOR_DIM:
+        return LOCAL_EMBEDDING_MODEL
+    elif dim == GEMINI_VECTOR_DIM:
+        return GEMINI_EMBEDDING_MODEL
+    return f"unknown_{dim}"
+
+
+def are_embeddings_compatible(
+    vec_a: list[float] | None,
+    vec_b: list[float] | None,
+    model_a: str | None = None,
+    model_b: str | None = None,
+) -> bool:
     """
-    Compute semantic embedding for text.
+    Determine whether two embeddings belong to the same semantic vector space.
+    
+    Two embeddings are compatible if and only if:
+    1. Neither vector is empty or None.
+    2. Dimensions match exactly (len(vec_a) == len(vec_b)).
+    3. Models are compatible:
+       - If both models are specified, they must be equal (model_a == model_b).
+       - If models differ (even with identical dimensions), they are incompatible.
+       - If models are unspecified, they are inferred from dimension for known spaces.
+    """
+    if not vec_a or not vec_b:
+        return False
+    if len(vec_a) != len(vec_b):
+        return False
+
+    eff_model_a = infer_embedding_model(vec_a, model_a)
+    eff_model_b = infer_embedding_model(vec_b, model_b)
+
+    if eff_model_a and eff_model_b and eff_model_a != eff_model_b:
+        return False
+
+    return True
+
+
+async def compute_embedding_with_model(text: str) -> tuple[list[float], str]:
+    """
+    Compute semantic embedding for text along with the model identifier.
     Tries Google Gemini text-embedding-004 first if API key is configured,
     falling back seamlessly to local semantic vectorizer.
     """
@@ -87,38 +135,57 @@ async def compute_embedding(text: str) -> list[float]:
                 model="text-embedding-004",
                 contents=text,
             )
-            if hasattr(result, "embedding") and hasattr(result.embedding, "values"):
-                vals = list(result.embedding.values)
+            emb_obj = getattr(result, "embedding", None)
+            if emb_obj is not None and hasattr(emb_obj, "values"):
+                vals = list(getattr(emb_obj, "values", []))
                 arr = np.array(vals, dtype=np.float32)
-                norm = np.linalg.norm(arr)
+                norm = float(np.linalg.norm(arr))
                 if norm > 1e-6:
                     arr = arr / norm
-                return arr.tolist()
+                return arr.tolist(), GEMINI_EMBEDDING_MODEL
         except Exception as e:
             log.debug("Gemini embedding fallback to local vectorizer: %s", e)
 
-    return compute_local_embedding(text)
+    return compute_local_embedding(text), LOCAL_EMBEDDING_MODEL
 
 
-def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
-    """Compute cosine similarity between two float vectors."""
-    if not vec_a or not vec_b:
+async def compute_embedding(text: str) -> list[float]:
+    """
+    Compute semantic embedding for text (backward-compatible).
+    Returns the vector as a list of floats.
+    """
+    vec, _ = await compute_embedding_with_model(text)
+    return vec
+
+
+def cosine_similarity(
+    vec_a: list[float] | None,
+    vec_b: list[float] | None,
+    model_a: str | None = None,
+    model_b: str | None = None,
+) -> float:
+    """
+    Compute cosine similarity between two float vectors.
+    
+    Returns 0.0 if:
+    - Either vector is empty or None.
+    - Dimensions do not match (never truncates or pads vectors).
+    - Models are incompatible (different embedding spaces).
+    - Either vector has near-zero magnitude.
+    """
+    if not are_embeddings_compatible(vec_a, vec_b, model_a, model_b):
         return 0.0
-    if len(vec_a) != len(vec_b):
-        # Different dimensions (e.g. Gemini 768 vs Local 256)
-        # Pad or truncate to the shorter length for comparison
-        min_dim = min(len(vec_a), len(vec_b))
-        a = np.array(vec_a[:min_dim], dtype=np.float32)
-        b = np.array(vec_b[:min_dim], dtype=np.float32)
-    else:
-        a = np.array(vec_a, dtype=np.float32)
-        b = np.array(vec_b, dtype=np.float32)
 
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
+    a = np.array(vec_a, dtype=np.float32)
+    b = np.array(vec_b, dtype=np.float32)
+
+    norm_a = float(np.linalg.norm(a))
+    norm_b = float(np.linalg.norm(b))
     if norm_a < 1e-6 or norm_b < 1e-6:
         return 0.0
-    return float(np.dot(a, b) / (norm_a * norm_b))
+
+    sim = float(np.dot(a, b) / (norm_a * norm_b))
+    return max(-1.0, min(1.0, sim))
 
 
 class SemanticVectorStore:
@@ -126,26 +193,55 @@ class SemanticVectorStore:
 
     def __init__(self) -> None:
         self._cache: dict[str, list[float]] = {}  # record_id -> vector
+        self._model_cache: dict[str, str] = {}  # record_id -> model_name
 
-    async def get_or_create_embedding(self, record_id: str, text: str, existing: list[float] | None = None) -> list[float]:
+    async def get_or_create_embedding(
+        self,
+        record_id: str,
+        text: str,
+        existing: list[float] | None = None,
+        model_name: str | None = None,
+    ) -> list[float]:
         """Get cached embedding or compute and cache a new one."""
+        vec, _ = await self.get_or_create_embedding_with_model(
+            record_id=record_id,
+            text=text,
+            existing=existing,
+            model_name=model_name,
+        )
+        return vec
+
+    async def get_or_create_embedding_with_model(
+        self,
+        record_id: str,
+        text: str,
+        existing: list[float] | None = None,
+        model_name: str | None = None,
+    ) -> tuple[list[float], str]:
+        """Get cached embedding with model identifier or compute and cache a new one."""
         if existing and len(existing) > 0:
             self._cache[record_id] = existing
-            return existing
-        if record_id in self._cache:
-            return self._cache[record_id]
+            eff_model = infer_embedding_model(existing, model_name) or LOCAL_EMBEDDING_MODEL
+            self._model_cache[record_id] = eff_model
+            return existing, eff_model
 
-        emb = await compute_embedding(text)
+        if record_id in self._cache:
+            return self._cache[record_id], self._model_cache.get(record_id, LOCAL_EMBEDDING_MODEL)
+
+        emb, eff_model = await compute_embedding_with_model(text)
         self._cache[record_id] = emb
-        return emb
+        self._model_cache[record_id] = eff_model
+        return emb, eff_model
 
     def evict(self, record_id: str) -> None:
         """Evict record embedding from memory cache."""
         self._cache.pop(record_id, None)
+        self._model_cache.pop(record_id, None)
 
     def clear(self) -> None:
         """Clear the in-memory vector cache."""
         self._cache.clear()
+        self._model_cache.clear()
 
     async def rank_records(
         self,
@@ -161,7 +257,7 @@ class SemanticVectorStore:
         if not records or not query.strip():
             return [(r, 1.0) for r in records[:limit]]
 
-        query_vec = await compute_embedding(query)
+        query_vec, query_model = await compute_embedding_with_model(query)
         q_lower = query.lower().strip()
         q_words = set(re.findall(r"\w+", q_lower))
 
@@ -170,12 +266,20 @@ class SemanticVectorStore:
         for rec in records:
             # Build representative text for this record
             rep_text = f"{rec.key} {rec.value} {' '.join(rec.tags)}"
-            rec_vec = await self.get_or_create_embedding(
-                rec.id, rep_text, getattr(rec, "embedding", None)
+            rec_existing_emb = getattr(rec, "embedding", None)
+            rec_existing_model = getattr(rec, "embedding_model", None)
+
+            rec_vec, rec_model = await self.get_or_create_embedding_with_model(
+                rec.id, rep_text, rec_existing_emb, rec_existing_model
             )
 
-            # 1. Cosine similarity
-            sem_sim = cosine_similarity(query_vec, rec_vec)
+            # 1. Cosine similarity only between compatible embedding spaces
+            if are_embeddings_compatible(query_vec, rec_vec, query_model, rec_model):
+                sem_sim = cosine_similarity(query_vec, rec_vec, query_model, rec_model)
+            else:
+                # Incompatible spaces: never fabricate cosine similarity.
+                # Exclude from vector comparison; rely on safe keyword fallback.
+                sem_sim = 0.0
 
             # 2. Exact keyword / substring boost
             key_lower = rec.key.lower()
@@ -204,3 +308,18 @@ class SemanticVectorStore:
 
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:limit]
+
+
+__all__ = [
+    "LOCAL_VECTOR_DIM",
+    "LOCAL_EMBEDDING_MODEL",
+    "GEMINI_VECTOR_DIM",
+    "GEMINI_EMBEDDING_MODEL",
+    "infer_embedding_model",
+    "are_embeddings_compatible",
+    "compute_local_embedding",
+    "compute_embedding_with_model",
+    "compute_embedding",
+    "cosine_similarity",
+    "SemanticVectorStore",
+]

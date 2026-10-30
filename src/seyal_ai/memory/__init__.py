@@ -40,8 +40,11 @@ MemoryPrivacyFilter = _canonical_privacy.MemoryPrivacyFilter
 MemoryStorage = _canonical_storage.MemoryStorage
 SemanticVectorStore = _canonical_vector_store.SemanticVectorStore
 compute_embedding = _canonical_vector_store.compute_embedding
+compute_embedding_with_model = _canonical_vector_store.compute_embedding_with_model
 compute_local_embedding = _canonical_vector_store.compute_local_embedding
 cosine_similarity = _canonical_vector_store.cosine_similarity
+are_embeddings_compatible = _canonical_vector_store.are_embeddings_compatible
+infer_embedding_model = _canonical_vector_store.infer_embedding_model
 
 ContextState = _canonical_types.ContextState
 MemoryCategory = _canonical_types.MemoryCategory

@@ -17,7 +17,11 @@ from typing import Any
 from seyal_ai.core.config import get_settings
 from seyal_ai.platform.memory.privacy import MemoryPrivacyFilter
 from seyal_ai.platform.memory.types import MemoryCategory, MemoryRecord, PrivacyLevel
-from seyal_ai.platform.memory.vector_store import SemanticVectorStore, compute_embedding
+from seyal_ai.platform.memory.vector_store import (
+    SemanticVectorStore,
+    compute_embedding,
+    compute_embedding_with_model,
+)
 from seyal_ai.utils.logging import get_logger
 
 log = get_logger("memory.storage")
@@ -178,9 +182,12 @@ class MemoryStorage:
             # Compute and attach vector embedding for semantic indexing
             rep_text = f"{clean_key} {clean_value} {' '.join(record.tags)}"
             try:
-                emb = await compute_embedding(rep_text)
+                emb, model_name = await compute_embedding_with_model(rep_text)
                 record.embedding = emb
-                await self._vector_store.get_or_create_embedding(record.id, rep_text, emb)
+                record.embedding_model = model_name
+                await self._vector_store.get_or_create_embedding(
+                    record.id, rep_text, emb, model_name=model_name
+                )
             except Exception as emb_err:
                 log.debug("Vector embedding computation notice: %s", emb_err)
 
