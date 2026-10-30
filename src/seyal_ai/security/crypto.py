@@ -20,7 +20,11 @@ from seyal_ai.utils.logging import get_logger
 
 log = get_logger("security.crypto")
 
-# Optional cryptography library support with fallback to built-in hashlib/AES primitives
+class CryptographyUnavailableError(RuntimeError):
+    """Raised when authenticated encryption cannot be performed because required cryptographic primitives are unavailable."""
+
+
+# Authenticated encryption support using cryptography (AES-GCM)
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -28,7 +32,7 @@ try:
 except ImportError:
     AESGCM = None  # type: ignore[assignment, misc]
     _HAS_CRYPTOGRAPHY = False
-    log.info("cryptography package not found; using pure Python PBKDF2/HMAC vault fallback")
+    log.warning("cryptography package not installed; authenticated encryption primitives unavailable")
 
 
 @dataclass
@@ -126,39 +130,34 @@ class SecretVault:
         return self._key_mgr.get_or_create_master_key()
 
     def _encrypt(self, plaintext: str) -> str:
-        """Encrypt plaintext string to base64 ciphertext."""
+        """Encrypt plaintext string to base64 ciphertext using authenticated AES-256-GCM."""
+        if not _HAS_CRYPTOGRAPHY or AESGCM is None:
+            raise CryptographyUnavailableError(
+                "Authenticated encryption is unavailable: 'cryptography' library is required. "
+                "Refusing to write secrets using insecure fallback encryption."
+            )
         key = self._get_encryption_key()
-        if _HAS_CRYPTOGRAPHY and AESGCM is not None:
-            aesgcm = AESGCM(key)
-            nonce = secrets.token_bytes(12)
-            ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
-            combined = nonce + ciphertext
-            return base64.b64encode(combined).decode("utf-8")
-        else:
-            # Fallback simple XOR-stream with SHA256 PRF key derivation
-            nonce = secrets.token_bytes(16)
-            stream_key = hashlib.sha256(key + nonce).digest()
-            raw_bytes = plaintext.encode("utf-8")
-            encrypted = bytes(b ^ stream_key[i % len(stream_key)] for i, b in enumerate(raw_bytes))
-            combined = nonce + encrypted
-            return base64.b64encode(combined).decode("utf-8")
+        aesgcm = AESGCM(key)
+        nonce = secrets.token_bytes(12)
+        ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+        combined = nonce + ciphertext
+        return base64.b64encode(combined).decode("utf-8")
 
     def _decrypt(self, ciphertext_b64: str) -> str:
-        """Decrypt base64 ciphertext to plaintext string."""
+        """Decrypt base64 ciphertext to plaintext string using authenticated AES-256-GCM."""
+        if not _HAS_CRYPTOGRAPHY or AESGCM is None:
+            raise CryptographyUnavailableError(
+                "Authenticated decryption is unavailable: 'cryptography' library is required."
+            )
         key = self._get_encryption_key()
         raw = base64.b64decode(ciphertext_b64.encode("utf-8"))
-        if _HAS_CRYPTOGRAPHY and AESGCM is not None:
-            aesgcm = AESGCM(key)
-            nonce = raw[:12]
-            ciphertext = raw[12:]
-            decrypted = aesgcm.decrypt(nonce, ciphertext, None)
-            return decrypted.decode("utf-8")
-        else:
-            nonce = raw[:16]
-            encrypted = raw[16:]
-            stream_key = hashlib.sha256(key + nonce).digest()
-            decrypted = bytes(b ^ stream_key[i % len(stream_key)] for i, b in enumerate(encrypted))
-            return decrypted.decode("utf-8")
+        if len(raw) < 28:
+            raise ValueError("Corrupt ciphertext payload: minimum 28 bytes required for AES-GCM nonce and auth tag.")
+        aesgcm = AESGCM(key)
+        nonce = raw[:12]
+        ciphertext = raw[12:]
+        decrypted = aesgcm.decrypt(nonce, ciphertext, None)
+        return decrypted.decode("utf-8")
 
     def _load_vault(self) -> None:
         """Load and decrypt entries from disk."""
@@ -171,8 +170,10 @@ class SecretVault:
             encrypted_payload = json.loads(raw_data)
             decrypted_json = self._decrypt(encrypted_payload["payload"])
             self._cache = json.loads(decrypted_json)
+        except CryptographyUnavailableError:
+            raise
         except Exception as e:
-            log.warning("Could not decrypt secret vault (corrupted or new key): %s", e)
+            log.warning("Could not decrypt secret vault (corrupted, tampered, or invalid key): %s", e)
             self._cache = {}
 
     def _save_vault(self) -> None:
@@ -184,8 +185,11 @@ class SecretVault:
             self.vault_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             if os.name != "nt":
                 os.chmod(self.vault_path, 0o600)
+        except CryptographyUnavailableError:
+            raise
         except Exception as e:
             log.error("Failed to write encrypted vault to disk: %s", e)
+            raise
 
     def set_secret(self, key: str, value: str) -> None:
         """Store or update a secret in the vault."""

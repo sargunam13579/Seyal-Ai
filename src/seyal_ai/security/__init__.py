@@ -7,7 +7,12 @@ granular permission scopes, terminal command safety, and audit logging.
 
 from seyal_ai.security.audit import AuditLogger
 from seyal_ai.security.auth import AuthManager, RateLimitWindow
-from seyal_ai.security.crypto import KeyManager, SecretEntry, SecretVault
+from seyal_ai.security.crypto import (
+    CryptographyUnavailableError,
+    KeyManager,
+    SecretEntry,
+    SecretVault,
+)
 from seyal_ai.security.pairing import DevicePairingManager, PairedDevice, PairingSession
 from seyal_ai.security.permissions import (
     PermissionAction,
@@ -26,6 +31,7 @@ __all__ = [
     "AuditLogger",
     "AuthManager",
     "RateLimitWindow",
+    "CryptographyUnavailableError",
     "KeyManager",
     "SecretEntry",
     "SecretVault",

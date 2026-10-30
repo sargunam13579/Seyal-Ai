@@ -59,27 +59,41 @@ def decode_supabase_jwt(
     Args:
         token: The raw JWT string from Authorization Bearer header.
         secret: The SUPABASE_JWT_SECRET or SUPABASE_SERVICE_ROLE_KEY.
-        verify_signature: If True and secret is provided, validates signature.
+        verify_signature: If True, validates cryptographic signature using secret.
 
     Returns:
-        Decoded payload dictionary or None if invalid.
+        Decoded payload dictionary or None if invalid/unverified.
     """
     try:
-        if secret and verify_signature:
+        if verify_signature:
+            if not secret or not secret.strip():
+                log.warning("Cannot verify Supabase JWT: secret is missing or empty")
+                return None
             payload = jwt.decode(
                 token,
                 secret,
                 algorithms=["HS256", "RS256"],
                 audience="authenticated",
-                options={"verify_aud": True},
+                options={
+                    "verify_signature": True,
+                    "verify_exp": True,
+                    "verify_aud": True,
+                },
             )
         else:
-            # Decode without signature check if secret is not configured yet in local dev
+            # Explicit unverified decode only when requested by caller (never for auth decisions)
             payload = jwt.decode(
                 token,
                 algorithms=["HS256", "RS256"],
                 options={"verify_signature": False},
             )
+
+        # Validate that the sub (user ID) claim exists and is non-empty
+        sub = payload.get("sub")
+        if not sub or not isinstance(sub, str) or not sub.strip():
+            log.warning("Supabase JWT payload rejected: missing or invalid 'sub' claim")
+            return None
+
         return payload
     except jwt.ExpiredSignatureError:
         log.warning("Supabase JWT token has expired")
@@ -95,35 +109,36 @@ def decode_supabase_jwt(
 def verify_supabase_token(token: str, settings: Optional[SeyalAiSettings] = None) -> Optional[SupabaseUser]:
     """
     Verify token and return a SupabaseUser object.
+    Strictly validates cryptographic signature against the configured JWT secret.
+    Never accepts unverified payloads or forged tokens.
     """
     if not settings:
         settings = get_settings()
 
-    jwt_secret = settings.supabase_jwt_secret or settings.supabase_service_role_key
-    payload = None
+    jwt_secret = (
+        settings.supabase_jwt_secret
+        or settings.supabase_service_role_key
+        or settings.security.supabase_jwt_secret
+        or settings.security.supabase_service_role_key
+    )
 
-    if jwt_secret:
-        # Try verifying signature first
-        payload = decode_supabase_jwt(
-            token,
-            secret=jwt_secret,
-            verify_signature=True,
-        )
+    if not jwt_secret or not jwt_secret.strip():
+        log.warning("Supabase token verification failed: no JWT secret configured")
+        return None
 
-    # Fallback to signature-free decode in development/local mode if signature check fails or secret is missing
-    if not payload:
-        payload = decode_supabase_jwt(
-            token,
-            verify_signature=False,
-        )
-        if payload and jwt_secret:
-            log.warning("Supabase JWT signature verification failed (incorrect SUPABASE_JWT_SECRET?). Falling back to unverified payload in development.")
+    # Cryptographic signature validation is mandatory for all tokens
+    payload = decode_supabase_jwt(
+        token,
+        secret=jwt_secret,
+        verify_signature=True,
+    )
 
     if not payload:
         return None
 
     user = SupabaseUser(payload)
     if user.is_expired:
+        log.warning("Supabase user session is expired")
         return None
 
     return user
@@ -137,40 +152,35 @@ async def get_current_user(
     FastAPI dependency to extract and verify the current authenticated Supabase user.
 
     Raises:
-        HTTPException 401 if authentication fails and require_auth is enabled.
+        HTTPException 401 if authentication fails or bearer token is missing/invalid.
     """
     settings: SeyalAiSettings = getattr(request.app.state, "settings", get_settings())
+    is_prod = (getattr(settings, "environment", "") or "").strip().lower() == "production"
 
     if not credentials or not credentials.credentials:
-        if settings.security.require_auth:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing authorization bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        # Development fallback mock user when require_auth is False
-        return SupabaseUser({
-            "sub": "local-dev-user-0000",
-            "email": "dev@seyal.local",
-            "role": "authenticated",
-            "aud": "authenticated",
-        })
+        # Development fallback mock user ONLY if explicitly enabled and NOT in production
+        if not is_prod and getattr(settings.security, "allow_dev_auth_bypass", False):
+            return SupabaseUser({
+                "sub": "local-dev-user-0000",
+                "email": "dev@seyal.local",
+                "role": "authenticated",
+                "aud": "authenticated",
+            })
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authorization bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     token = credentials.credentials
     user = verify_supabase_token(token, settings=settings)
 
     if not user:
-        if settings.security.require_auth:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired authentication token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return SupabaseUser({
-            "sub": "local-dev-user-0000",
-            "email": "dev@seyal.local",
-            "role": "authenticated",
-            "aud": "authenticated",
-        })
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     return user

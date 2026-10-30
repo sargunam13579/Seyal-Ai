@@ -59,6 +59,51 @@ class TestSecretVaultAndEncryption:
         raw_disk = vault_path.read_text(encoding="utf-8")
         assert "sk-secret-key-12345" not in raw_disk
 
+    def test_sec01b_tampered_ciphertext_rejected(self, tmp_path: Path):
+        """Tampered ciphertext or modified authentication tag causes decryption to fail."""
+        import base64
+        import json
+        from cryptography.exceptions import InvalidTag
+
+        vault_path = tmp_path / "vault_tamper.enc"
+        key_mgr = KeyManager(tmp_path / "keys")
+        vault = SecretVault(vault_path=vault_path, key_manager=key_mgr)
+        vault.set_secret("SENSITIVE_KEY", "real-super-secret-token")
+
+        # Corrupt the ciphertext payload by flipping bits in the payload
+        payload_data = json.loads(vault_path.read_text(encoding="utf-8"))
+        raw = bytearray(base64.b64decode(payload_data["payload"]))
+        raw[-1] ^= 0xFF  # Corrupt the 16-byte authentication tag
+        tampered_b64 = base64.b64encode(bytes(raw)).decode("utf-8")
+
+        # Direct decryption of tampered ciphertext must raise InvalidTag
+        with pytest.raises(InvalidTag):
+            vault._decrypt(tampered_b64)
+
+        # Fresh vault instance loading tampered file must fail safely with empty cache
+        payload_data["payload"] = tampered_b64
+        vault_path.write_text(json.dumps(payload_data), encoding="utf-8")
+        tampered_vault = SecretVault(vault_path=vault_path, key_manager=key_mgr)
+        assert tampered_vault.get_secret("SENSITIVE_KEY") is None
+
+    def test_sec01c_unavailable_dependency_fails_closed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """When cryptography library is unavailable, vault fails closed rather than using insecure cipher."""
+        import seyal_ai.security.crypto as sec_crypto
+        from seyal_ai.security.crypto import CryptographyUnavailableError
+
+        vault_path = tmp_path / "vault_fail_closed.enc"
+        key_mgr = KeyManager(tmp_path / "keys")
+        vault = SecretVault(vault_path=vault_path, key_manager=key_mgr)
+
+        monkeypatch.setattr(sec_crypto, "_HAS_CRYPTOGRAPHY", False)
+        monkeypatch.setattr(sec_crypto, "AESGCM", None)
+
+        with pytest.raises(CryptographyUnavailableError, match="Authenticated encryption is unavailable"):
+            vault._encrypt("secret_payload")
+
+        with pytest.raises(CryptographyUnavailableError, match="Authenticated decryption is unavailable"):
+            vault._decrypt("c29tZV9kZXZpY2VfdG9rZW4=")
+
 
 # ===========================================================================
 # 2. TERMINAL DANGEROUS COMMAND PROTECTION (SEC-02)

@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 
 # ---------------------------------------------------------------------------
@@ -26,7 +26,7 @@ def _get_project_root() -> Path:
     """Return the project root, compatible with both normal and PyInstaller frozen execution."""
     if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
         # Running as a PyInstaller bundle — _MEIPASS is the temp extraction dir
-        return Path(_sys._MEIPASS)
+        return Path(getattr(_sys, '_MEIPASS'))
     # Running normally — go 3 levels up from this file: seyal_ai/core/config.py -> seyal_ai/
     return Path(__file__).resolve().parents[3]
 
@@ -154,7 +154,8 @@ class SecurityPermissionSettings(BaseSettings):
 
 
 class SecuritySettings(BaseSettings):
-    require_auth: bool = False
+    require_auth: bool = True
+    allow_dev_auth_bypass: bool = True
     session_timeout_minutes: int = 30
     max_high_risk_per_minute: int = 5
     audit_enabled: bool = True
@@ -207,6 +208,7 @@ class SeyalAiSettings(BaseSettings):
     # General
     app_name: str = "Seyal AI"
     version: str = "0.1.0"
+    environment: str = "development"
     data_dir: str = "~/.seyal_ai"
     log_level: str = "INFO"
     log_file: str = "seyal_ai.log"
@@ -248,6 +250,37 @@ class SeyalAiSettings(BaseSettings):
         (data / "logs").mkdir(exist_ok=True)
         (data / "screenshots").mkdir(exist_ok=True)
         (data / "recordings").mkdir(exist_ok=True)
+
+    @model_validator(mode="after")
+    def _validate_security_configuration(self) -> Self:
+        self.validate_production_security()
+        return self
+
+    def validate_production_security(self) -> None:
+        """
+        Validate that production environment adheres to strict security standards.
+        Rejects unsafe production configurations during startup.
+        """
+        env = (self.environment or "").strip().lower()
+        if env == "production":
+            if not self.security.require_auth:
+                raise ValueError(
+                    "Unsafe production configuration: 'security.require_auth' cannot be False in production."
+                )
+            if self.security.allow_dev_auth_bypass:
+                raise ValueError(
+                    "Unsafe production configuration: 'security.allow_dev_auth_bypass' cannot be True in production."
+                )
+            jwt_secret = (
+                self.supabase_jwt_secret
+                or self.supabase_service_role_key
+                or self.security.supabase_jwt_secret
+                or self.security.supabase_service_role_key
+            )
+            if not jwt_secret or not jwt_secret.strip():
+                raise ValueError(
+                    "Unsafe production configuration: Supabase JWT secret (SUPABASE_JWT_SECRET or SUPABASE_SERVICE_ROLE_KEY) is required in production."
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +326,7 @@ def load_settings(env: str | None = None) -> SeyalAiSettings:
     # Flatten the 'general' section to top-level (matches SeyalAiSettings fields)
     general = merged.pop("general", {})
     merged = _deep_merge(general, merged)
+    merged.setdefault("environment", env)
 
     # Build settings from merged TOML + env overrides
     _settings = SeyalAiSettings(**merged)
