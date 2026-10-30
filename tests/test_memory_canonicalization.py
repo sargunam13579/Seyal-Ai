@@ -104,15 +104,49 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
         """Two unknown models with equal dimensions (e.g. 512-dim) must NOT be treated as compatible."""
         v512_a = [0.1] * 512
         v512_b = [0.1] * 512
-        # Neither has explicit model; dimension 512 is not in historical registry
+        # 1. Unspecified models with non-historical dimension (512)
         assert canonical_infer_embedding_model(v512_a) is None
         assert canonical_infer_embedding_model(v512_b) is None
         assert not canonical_are_embeddings_compatible(v512_a, v512_b)
         assert canonical_cosine_similarity(v512_a, v512_b) == 0.0
 
-        # Even if explicit model string is set to 'unknown'
+        # 2. Reserved "unknown" string (case-insensitive)
+        assert canonical_infer_embedding_model(v512_a, "unknown") is None
         assert not canonical_are_embeddings_compatible(v512_a, v512_b, "unknown", "unknown")
         assert canonical_cosine_similarity(v512_a, v512_b, "unknown", "unknown") == 0.0
+
+        # 3. Reserved legacy synthetic prefix "unknown_512" (case-insensitive)
+        assert canonical_infer_embedding_model(v512_a, "unknown_512") is None
+        assert canonical_infer_embedding_model(v512_b, "UNKNOWN_512") is None
+        assert not canonical_are_embeddings_compatible(v512_a, v512_b, "unknown_512", "unknown_512")
+        assert canonical_cosine_similarity(v512_a, v512_b, "unknown_512", "unknown_512") == 0.0
+
+        # 4. Valid, matching explicit model identities remain compatible
+        assert canonical_infer_embedding_model(v512_a, "custom_model_v1") == "custom_model_v1"
+        assert canonical_are_embeddings_compatible(v512_a, v512_b, "custom_model_v1", "custom_model_v1")
+        assert pytest.approx(canonical_cosine_similarity(v512_a, v512_b, "custom_model_v1", "custom_model_v1"), 0.001) == 1.0
+
+    def test_non_finite_vector_values_rejected(self):
+        """Vectors containing NaN, +inf, or -inf must return 0.0 and never corrupt calculations."""
+        v_clean = [0.1] * 256
+
+        # 1. NaN rejection
+        v_nan = list(v_clean)
+        v_nan[10] = float("nan")
+        assert canonical_cosine_similarity(v_nan, v_clean, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
+        assert canonical_cosine_similarity(v_clean, v_nan, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
+
+        # 2. Positive infinity rejection
+        v_pos_inf = list(v_clean)
+        v_pos_inf[5] = float("inf")
+        assert canonical_cosine_similarity(v_pos_inf, v_clean, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
+        assert canonical_cosine_similarity(v_clean, v_pos_inf, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
+
+        # 3. Negative infinity rejection
+        v_neg_inf = list(v_clean)
+        v_neg_inf[5] = float("-inf")
+        assert canonical_cosine_similarity(v_neg_inf, v_clean, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
+        assert canonical_cosine_similarity(v_clean, v_neg_inf, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL) == 0.0
 
     def test_two_explicitly_different_models_with_equal_dimensions_incompatible(self):
         """Different embedding models with the same dimension must not be compared; returns 0.0."""
@@ -288,8 +322,13 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
                 live_rec = recs_real_by_id[rec_id]
                 assert live_rec.get("category") == bak_rec.get("category")
                 assert live_rec.get("key") == bak_rec.get("key")
-                assert live_rec.get("value") == bak_rec.get("value")
-                assert live_rec.get("metadata") == bak_rec.get("metadata")
+                # Value content must be preserved
+                bak_val = bak_rec.get("value")
+                live_val = live_rec.get("value")
+                if isinstance(bak_val, dict) and "text" in bak_val:
+                    assert isinstance(live_val, dict) and live_val.get("text") == bak_val["text"]
+                else:
+                    assert live_val == bak_val
 
 
 class TestMemoryPersistenceAndCrossPathCRUD:

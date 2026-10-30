@@ -85,16 +85,26 @@ def infer_embedding_model(embedding: list[float] | None, model_name: str | None 
     Resolve embedding model identity.
     
     Rules:
-    1. Explicit model metadata always takes precedence (if non-empty and not 'unknown').
-    2. Dimension-based inference is restricted strictly to verified, historically
-       documented generator dimensions in Seyal AI:
-       - 256 -> local_ngram_256 (local subword n-gram vectorizer)
-       - 768 -> gemini_text_embedding_004 (Google Gemini embedder)
-    3. Any other dimensions or unverified vectors return None (unidentified/unknown).
-       Unknown models are NEVER assigned a synthetic matching identifier like 'unknown_{dim}'.
+    1. If explicit model_name is provided:
+       - If it is empty, whitespace, "unknown" (case-insensitive), or begins with
+         the reserved synthetic prefix "unknown_" (case-insensitive), it is rejected
+         and returns None (unidentified/incompatible).
+       - Otherwise, it is a valid explicit model identity and takes precedence.
+    2. If explicit model_name is NOT provided (None):
+       - Dimension-based inference is restricted strictly to verified, historically
+         documented generator dimensions in Seyal AI:
+         - 256 -> local_ngram_256 (local subword n-gram vectorizer)
+         - 768 -> gemini_text_embedding_004 (Google Gemini embedder)
+       - Any other dimensions or unverified vectors return None (unidentified/unknown).
+         Unknown models are NEVER assigned a synthetic matching identifier like 'unknown_{dim}'.
     """
-    if model_name and model_name.strip() and model_name.strip().lower() != "unknown":
-        return model_name.strip()
+    if model_name is not None:
+        clean = model_name.strip()
+        lower = clean.lower()
+        if not clean or lower == "unknown" or lower.startswith("unknown_"):
+            return None
+        return clean
+
     if not embedding:
         return None
     dim = len(embedding)
@@ -113,10 +123,10 @@ def are_embeddings_compatible(
     Strict Compatibility Rules:
     1. Neither vector may be empty or None.
     2. Dimensions must match exactly (len(vec_a) == len(vec_b)).
-    3. Both vectors must have a verified, non-empty model identity.
-    4. If either vector's model identity is unknown/unverified (None or 'unknown'),
-       they are treated as INCOMPATIBLE by default. Matching dimensions alone
-       do NOT establish compatibility.
+    3. Both vectors must have a verified, non-empty, non-reserved model identity.
+    4. If either vector's model identity is unknown/unverified (None, 'unknown',
+       or starting with 'unknown_'), they are treated as INCOMPATIBLE by default.
+       Matching dimensions alone do NOT establish compatibility.
     5. The model identities must match exactly (eff_model_a == eff_model_b).
     """
     if not vec_a or not vec_b:
@@ -128,7 +138,7 @@ def are_embeddings_compatible(
     eff_model_b = infer_embedding_model(vec_b, model_b)
 
     # Unknown or unverified models must be treated as incompatible by default.
-    # Two unknown models (e.g. both 512-dim without explicit model) can NEVER be assumed compatible.
+    # Two unknown models (e.g. both 512-dim with model='unknown_512') can NEVER be assumed compatible.
     if not eff_model_a or not eff_model_b:
         return False
 
@@ -191,14 +201,21 @@ def cosine_similarity(
     Returns 0.0 if:
     - Either vector is empty or None.
     - Dimensions do not match (never truncates or pads vectors).
-    - Models are incompatible (different embedding spaces).
+    - Models are incompatible (different embedding spaces, unknown models, or reserved IDs).
+    - Any element in either vector is non-finite (NaN, +inf, -inf).
     - Either vector has near-zero magnitude.
     """
     if not are_embeddings_compatible(vec_a, vec_b, model_a, model_b):
         return 0.0
 
+    assert vec_a is not None and vec_b is not None
+
     a = np.array(vec_a, dtype=np.float32)
     b = np.array(vec_b, dtype=np.float32)
+
+    # Validate finite values: reject NaN, +inf, -inf
+    if not np.all(np.isfinite(a)) or not np.all(np.isfinite(b)):
+        return 0.0
 
     norm_a = float(np.linalg.norm(a))
     norm_b = float(np.linalg.norm(b))
@@ -206,6 +223,8 @@ def cosine_similarity(
         return 0.0
 
     sim = float(np.dot(a, b) / (norm_a * norm_b))
+    if not math.isfinite(sim):
+        return 0.0
     return max(-1.0, min(1.0, sim))
 
 
