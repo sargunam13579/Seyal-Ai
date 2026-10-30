@@ -322,13 +322,8 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
                 live_rec = recs_real_by_id[rec_id]
                 assert live_rec.get("category") == bak_rec.get("category")
                 assert live_rec.get("key") == bak_rec.get("key")
-                # Value content must be preserved
-                bak_val = bak_rec.get("value")
-                live_val = live_rec.get("value")
-                if isinstance(bak_val, dict) and "text" in bak_val:
-                    assert isinstance(live_val, dict) and live_val.get("text") == bak_val["text"]
-                else:
-                    assert live_val == bak_val
+                assert live_rec.get("metadata") == bak_rec.get("metadata")
+                assert live_rec.get("value") == bak_rec.get("value")
 
 
 class TestMemoryPersistenceAndCrossPathCRUD:
