@@ -188,6 +188,26 @@ class UserKnowledgeService:
         """Save full hub payload."""
         return self._save(data)
 
+    def get_knowledge_context(self) -> str:
+        """Return a compiled string of user knowledge and active standing rules for LLM context."""
+        data = self._load()
+        facts = data.get("user_knowledge", {})
+        rules = data.get("standing_rules", {})
+
+        parts: list[str] = []
+        if facts:
+            facts_str = ", ".join(f"{k}: {v}" for k, v in facts.items())
+            parts.append(f"User Facts: {facts_str}")
+        if rules:
+            active_rules = [
+                r.get("title", "")
+                for r in rules.values()
+                if isinstance(r, dict) and r.get("active", True) and r.get("title")
+            ]
+            if active_rules:
+                parts.append("Standing Rules: " + "; ".join(active_rules))
+        return "\n".join(parts)
+
     def wipe_all(self) -> bool:
         """Reset the user knowledge hub, clearing all facts, reminders, and standing rules."""
         return self._save(_get_default_hub())

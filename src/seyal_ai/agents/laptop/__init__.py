@@ -1,20 +1,9 @@
-"""Seyal AI Laptop Agent — Windows OS control, apps, files, browser, screen."""
+import sys
+from seyal_ai.agents.computer_use import laptop as _target
 
-from seyal_ai.agents.laptop.agent import LaptopAgent, LaptopAgentClient
-from seyal_ai.agents.laptop.protocol import (
-    AgentHeartbeat,
-    DeviceRegistration,
-    DeviceStatus,
-    ToolExecutionRequest,
-    ToolExecutionResponse,
-)
+# Re-export all attributes
+for attr in dir(_target):
+    if not attr.startswith("__"):
+        globals()[attr] = getattr(_target, attr)
 
-__all__ = [
-    "LaptopAgent",
-    "LaptopAgentClient",
-    "DeviceRegistration",
-    "DeviceStatus",
-    "AgentHeartbeat",
-    "ToolExecutionRequest",
-    "ToolExecutionResponse",
-]
+sys.modules[__name__] = _target

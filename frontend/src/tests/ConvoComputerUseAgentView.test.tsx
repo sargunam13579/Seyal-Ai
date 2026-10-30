@@ -80,7 +80,7 @@ vi.mock('../services/api', () => ({
 }))
 
 // Import the actual React Component under test
-import { ConvoComputerUseAgentView } from '../components/convo_computer_use_agent/ConvoComputerUseAgentView'
+import { ConvoComputerUseAgentView } from '../features/computer_agent/ConvoComputerUseAgentView'
 
 describe('ConvoComputerUseAgentView — Real Component Integration Test (React Testing Library)', () => {
   beforeEach(() => {

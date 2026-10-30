@@ -4,9 +4,9 @@ import { SeyalAiProvider, useSeyalAi } from './context/SeyalAiContext';
 import { VoiceProvider, useVoice } from './context/VoiceContext';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
-import { ConfirmationModal } from './components/common/ConfirmationModal';
-import { ConvoComputerUseAgentView } from './components/convo_computer_use_agent';
-import { HeroAgentLogoOrb } from './components/convo_computer_use_agent/HeroAgentLogoOrb';
+import { ConfirmationModal } from './shared';
+import { ConvoComputerUseAgentView } from './features/computer_agent';
+import { HeroAgentLogoOrb } from './features/computer_agent/HeroAgentLogoOrb';
 
 // Lazy-load secondary views for code-splitting and faster initial bundle startup
 const SystemControlView = React.lazy(() => import('./components/views/SystemControlView').then(m => ({ default: m.SystemControlView })));
