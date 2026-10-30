@@ -183,6 +183,6 @@ class TestLegacyPathMonkeypatching:
             mock_store.return_value = CanonicalRecord(key="patched", value="value")
             mgr = CanonicalManager(storage=storage)
             res = await mgr.store_memory(key="patched", value="value")
-
+            assert isinstance(res, CanonicalRecord)
             assert res.key == "patched"
             assert mock_store.called
