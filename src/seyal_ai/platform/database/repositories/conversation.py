@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from seyal_ai.database.models import Conversation, Message, ToolCall, ToolResult
+from seyal_ai.platform.database.models import Conversation, Message, ToolCall, ToolResult
 
 
 class ConversationRepository:
@@ -32,7 +32,7 @@ class ConversationRepository:
         )
         # 1. Supabase first (if connected; queues outbox if offline)
         try:
-            from seyal_ai.database.sync import sync_manager
+            from seyal_ai.platform.database.sync import sync_manager
             await sync_manager.save_conversation_ordered(
                 session_id=session_id,
                 summary=summary,
@@ -75,7 +75,7 @@ class ConversationRepository:
         )
         # 1. Supabase first (if connected; queues outbox if offline)
         try:
-            from seyal_ai.database.sync import sync_manager
+            from seyal_ai.platform.database.sync import sync_manager
             await sync_manager.save_message_ordered(
                 conversation_id=conversation_id,
                 role=role,
@@ -271,7 +271,7 @@ class ConversationRepository:
         """Delete a conversation: Supabase first (when connected), then Local SQLite."""
         # 1. Supabase first (if connected; queues outbox if offline)
         try:
-            from seyal_ai.database.sync import sync_manager
+            from seyal_ai.platform.database.sync import sync_manager
             await sync_manager.delete_conversation_ordered(conversation_id)
         except Exception:
             pass
@@ -292,7 +292,7 @@ class ConversationRepository:
 
         # 1. Supabase first (one by one if connected; queues outbox if offline)
         try:
-            from seyal_ai.database.sync import sync_manager
+            from seyal_ai.platform.database.sync import sync_manager
             await sync_manager.batch_delete_ordered(conversation_ids)
         except Exception:
             pass

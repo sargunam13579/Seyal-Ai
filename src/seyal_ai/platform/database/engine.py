@@ -127,7 +127,7 @@ async def init_engine(
         expire_on_commit=False,
     )
 
-    from seyal_ai.database.models import Base
+    from seyal_ai.platform.database.models import Base
 
     async with _engine.begin() as conn:
         if "sqlite" in resolved_local_url:

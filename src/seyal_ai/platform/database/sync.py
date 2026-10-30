@@ -25,13 +25,13 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
-from seyal_ai.database.engine import (
+from seyal_ai.platform.database.engine import (
     get_cloud_engine,
     get_cloud_session,
     get_session,
     is_cloud_configured,
 )
-from seyal_ai.database.models import (
+from seyal_ai.platform.database.models import (
     Base,
     Conversation,
     Message,

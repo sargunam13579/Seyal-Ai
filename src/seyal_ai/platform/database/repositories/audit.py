@@ -11,7 +11,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from seyal_ai.database.models import AuditLog
+from seyal_ai.platform.database.models import AuditLog
 
 
 class AuditRepository:

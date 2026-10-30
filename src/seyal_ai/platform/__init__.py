@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import sys
 
-# Platform domain re-exports
-from seyal_ai import database, llm, memory, security, tools, vision, voice
+from seyal_ai.platform import database
+from seyal_ai import llm, memory, security, tools, vision, voice
 
 __all__ = [
     "llm",
