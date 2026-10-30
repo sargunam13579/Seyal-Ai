@@ -30,6 +30,13 @@ LOCAL_EMBEDDING_MODEL = "local_ngram_256"
 GEMINI_VECTOR_DIM = 768
 GEMINI_EMBEDDING_MODEL = "gemini_text_embedding_004"
 
+# Registry of historically documented and verified model signatures in Seyal AI:
+# Only these specific dimensions map to documented historical generators.
+HISTORICAL_DIMENSION_TO_MODEL: dict[int, str] = {
+    LOCAL_VECTOR_DIM: LOCAL_EMBEDDING_MODEL,
+    GEMINI_VECTOR_DIM: GEMINI_EMBEDDING_MODEL,
+}
+
 
 def _tokenize(text: str) -> list[str]:
     """Extract clean words and character n-grams from text."""
@@ -74,17 +81,24 @@ def compute_local_embedding(text: str, dim: int = LOCAL_VECTOR_DIM) -> list[floa
 
 
 def infer_embedding_model(embedding: list[float] | None, model_name: str | None = None) -> str | None:
-    """Infer or validate embedding model from explicit name or vector properties."""
-    if model_name:
-        return model_name
+    """
+    Resolve embedding model identity.
+    
+    Rules:
+    1. Explicit model metadata always takes precedence (if non-empty and not 'unknown').
+    2. Dimension-based inference is restricted strictly to verified, historically
+       documented generator dimensions in Seyal AI:
+       - 256 -> local_ngram_256 (local subword n-gram vectorizer)
+       - 768 -> gemini_text_embedding_004 (Google Gemini embedder)
+    3. Any other dimensions or unverified vectors return None (unidentified/unknown).
+       Unknown models are NEVER assigned a synthetic matching identifier like 'unknown_{dim}'.
+    """
+    if model_name and model_name.strip() and model_name.strip().lower() != "unknown":
+        return model_name.strip()
     if not embedding:
         return None
     dim = len(embedding)
-    if dim == LOCAL_VECTOR_DIM:
-        return LOCAL_EMBEDDING_MODEL
-    elif dim == GEMINI_VECTOR_DIM:
-        return GEMINI_EMBEDDING_MODEL
-    return f"unknown_{dim}"
+    return HISTORICAL_DIMENSION_TO_MODEL.get(dim)
 
 
 def are_embeddings_compatible(
@@ -94,15 +108,16 @@ def are_embeddings_compatible(
     model_b: str | None = None,
 ) -> bool:
     """
-    Determine whether two embeddings belong to the same semantic vector space.
+    Determine whether two embeddings belong to the exact same semantic vector space.
     
-    Two embeddings are compatible if and only if:
-    1. Neither vector is empty or None.
-    2. Dimensions match exactly (len(vec_a) == len(vec_b)).
-    3. Models are compatible:
-       - If both models are specified, they must be equal (model_a == model_b).
-       - If models differ (even with identical dimensions), they are incompatible.
-       - If models are unspecified, they are inferred from dimension for known spaces.
+    Strict Compatibility Rules:
+    1. Neither vector may be empty or None.
+    2. Dimensions must match exactly (len(vec_a) == len(vec_b)).
+    3. Both vectors must have a verified, non-empty model identity.
+    4. If either vector's model identity is unknown/unverified (None or 'unknown'),
+       they are treated as INCOMPATIBLE by default. Matching dimensions alone
+       do NOT establish compatibility.
+    5. The model identities must match exactly (eff_model_a == eff_model_b).
     """
     if not vec_a or not vec_b:
         return False
@@ -112,7 +127,13 @@ def are_embeddings_compatible(
     eff_model_a = infer_embedding_model(vec_a, model_a)
     eff_model_b = infer_embedding_model(vec_b, model_b)
 
-    if eff_model_a and eff_model_b and eff_model_a != eff_model_b:
+    # Unknown or unverified models must be treated as incompatible by default.
+    # Two unknown models (e.g. both 512-dim without explicit model) can NEVER be assumed compatible.
+    if not eff_model_a or not eff_model_b:
+        return False
+
+    # Explicit model identities must be identical
+    if eff_model_a != eff_model_b:
         return False
 
     return True
@@ -221,12 +242,13 @@ class SemanticVectorStore:
         """Get cached embedding with model identifier or compute and cache a new one."""
         if existing and len(existing) > 0:
             self._cache[record_id] = existing
-            eff_model = infer_embedding_model(existing, model_name) or LOCAL_EMBEDDING_MODEL
-            self._model_cache[record_id] = eff_model
+            eff_model = infer_embedding_model(existing, model_name) or ""
+            if eff_model:
+                self._model_cache[record_id] = eff_model
             return existing, eff_model
 
         if record_id in self._cache:
-            return self._cache[record_id], self._model_cache.get(record_id, LOCAL_EMBEDDING_MODEL)
+            return self._cache[record_id], self._model_cache.get(record_id, "")
 
         emb, eff_model = await compute_embedding_with_model(text)
         self._cache[record_id] = emb
@@ -315,6 +337,7 @@ __all__ = [
     "LOCAL_EMBEDDING_MODEL",
     "GEMINI_VECTOR_DIM",
     "GEMINI_EMBEDDING_MODEL",
+    "HISTORICAL_DIMENSION_TO_MODEL",
     "infer_embedding_model",
     "are_embeddings_compatible",
     "compute_local_embedding",

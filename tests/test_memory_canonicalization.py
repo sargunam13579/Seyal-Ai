@@ -39,6 +39,7 @@ from seyal_ai.platform.memory import (
 from seyal_ai.platform.memory.vector_store import (
     LOCAL_EMBEDDING_MODEL,
     GEMINI_EMBEDDING_MODEL,
+    HISTORICAL_DIMENSION_TO_MODEL as canonical_historical_dim_to_model,
 )
 
 # Legacy Imports
@@ -58,6 +59,9 @@ from seyal_ai.memory import (
     cosine_similarity as legacy_cosine_similarity,
     are_embeddings_compatible as legacy_are_embeddings_compatible,
     infer_embedding_model as legacy_infer_embedding_model,
+)
+from seyal_ai.memory.vector_store import (
+    HISTORICAL_DIMENSION_TO_MODEL as legacy_historical_dim_to_model,
 )
 
 
@@ -82,6 +86,7 @@ class TestMemoryCanonicalIdentities:
         assert canonical_cosine_similarity is legacy_cosine_similarity
         assert canonical_are_embeddings_compatible is legacy_are_embeddings_compatible
         assert canonical_infer_embedding_model is legacy_infer_embedding_model
+        assert canonical_historical_dim_to_model is legacy_historical_dim_to_model
 
     def test_cross_path_instance_checks(self):
         legacy_rec = LegacyRecord(key="test_key", value="test_val", category=LegacyCategory.CONVERSATION)
@@ -95,17 +100,39 @@ class TestMemoryCanonicalIdentities:
 class TestEmbeddingCompatibilityAndSemanticRecall:
     """Verify embedding space compatibility, retrieval ranking, and data safety."""
 
-    def test_local_versus_local_similarity(self):
-        """Identical local 256-dim embeddings yield positive cosine similarity."""
+    def test_two_unknown_models_with_equal_dimensions_incompatible(self):
+        """Two unknown models with equal dimensions (e.g. 512-dim) must NOT be treated as compatible."""
+        v512_a = [0.1] * 512
+        v512_b = [0.1] * 512
+        # Neither has explicit model; dimension 512 is not in historical registry
+        assert canonical_infer_embedding_model(v512_a) is None
+        assert canonical_infer_embedding_model(v512_b) is None
+        assert not canonical_are_embeddings_compatible(v512_a, v512_b)
+        assert canonical_cosine_similarity(v512_a, v512_b) == 0.0
+
+        # Even if explicit model string is set to 'unknown'
+        assert not canonical_are_embeddings_compatible(v512_a, v512_b, "unknown", "unknown")
+        assert canonical_cosine_similarity(v512_a, v512_b, "unknown", "unknown") == 0.0
+
+    def test_two_explicitly_different_models_with_equal_dimensions_incompatible(self):
+        """Different embedding models with the same dimension must not be compared; returns 0.0."""
+        v256_a = [0.2] * 256
+        v256_b = [0.2] * 256
+        assert not canonical_are_embeddings_compatible(v256_a, v256_b, "model_alpha_256", "model_beta_256")
+        sim_diff_models = canonical_cosine_similarity(v256_a, v256_b, "model_alpha_256", "model_beta_256")
+        assert sim_diff_models == 0.0
+
+    def test_same_model_and_dimensions_compatible(self):
+        """Identical models and dimensions yield positive cosine similarity."""
         v256_a = [0.1] * 256
         v256_b = [0.1] * 256
-        sim = canonical_cosine_similarity(v256_a, v256_b, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL)
-        assert pytest.approx(sim, 0.001) == 1.0
+        assert canonical_are_embeddings_compatible(v256_a, v256_b, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL)
+        sim_local = canonical_cosine_similarity(v256_a, v256_b, LOCAL_EMBEDDING_MODEL, LOCAL_EMBEDDING_MODEL)
+        assert pytest.approx(sim_local, 0.001) == 1.0
 
-    def test_gemini_versus_gemini_similarity(self):
-        """Identical Gemini 768-dim embeddings yield positive cosine similarity."""
         v768_a = [0.05] * 768
         v768_b = [0.05] * 768
+        assert canonical_are_embeddings_compatible(v768_a, v768_b, GEMINI_EMBEDDING_MODEL, GEMINI_EMBEDDING_MODEL)
         sim_768 = canonical_cosine_similarity(v768_a, v768_b, GEMINI_EMBEDDING_MODEL, GEMINI_EMBEDDING_MODEL)
         assert pytest.approx(sim_768, 0.001) == 1.0
 
@@ -117,13 +144,27 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
         sim_mixed = canonical_cosine_similarity(v256, v768)
         assert sim_mixed == 0.0
 
-    def test_different_models_same_dimension_incompatible(self):
-        """Different embedding models with the same dimension must not be compared; returns 0.0."""
-        v256_a = [0.2] * 256
-        v256_b = [0.2] * 256
-        assert not canonical_are_embeddings_compatible(v256_a, v256_b, "model_alpha_256", "model_beta_256")
-        sim_diff_models = canonical_cosine_similarity(v256_a, v256_b, "model_alpha_256", "model_beta_256")
-        assert sim_diff_models == 0.0
+    def test_legacy_256_dim_record_documented_historical_model(self):
+        """Documented historical Seyal AI 256-dim records safely infer local_ngram_256."""
+        legacy_emb = [0.1] * 256  # Inferred as local_ngram_256 from historical registry
+        assert canonical_infer_embedding_model(legacy_emb, None) == LOCAL_EMBEDDING_MODEL
+        query_local = [0.1] * 256
+        assert canonical_are_embeddings_compatible(query_local, legacy_emb)
+        sim = canonical_cosine_similarity(query_local, legacy_emb)
+        assert pytest.approx(sim, 0.001) == 1.0
+
+        # But strictly rejected when compared to Gemini 768
+        query_gemini = [0.05] * 768
+        assert not canonical_are_embeddings_compatible(query_gemini, legacy_emb)
+        assert canonical_cosine_similarity(query_gemini, legacy_emb) == 0.0
+
+    def test_legacy_record_whose_model_cannot_be_established(self):
+        """Legacy records with dimensions outside historical registry cannot be inferred and are rejected."""
+        unestablished_emb = [0.1] * 384
+        assert canonical_infer_embedding_model(unestablished_emb, None) is None
+        query_local = [0.1] * 256
+        assert not canonical_are_embeddings_compatible(query_local, unestablished_emb)
+        assert canonical_cosine_similarity(query_local, unestablished_emb) == 0.0
 
     def test_empty_or_missing_embeddings(self):
         """Empty or missing embeddings are incompatible and return 0.0 similarity."""
@@ -133,19 +174,6 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
         assert canonical_cosine_similarity([1.0], None) == 0.0
         assert not canonical_are_embeddings_compatible(None, [1.0])
 
-    def test_existing_records_without_model_metadata(self):
-        """Existing records with 256-dim embedding but no metadata safely match local 256-dim queries."""
-        legacy_emb = [0.1] * 256  # Inferred as local_ngram_256
-        query_local = [0.1] * 256
-        assert canonical_are_embeddings_compatible(query_local, legacy_emb)
-        sim = canonical_cosine_similarity(query_local, legacy_emb)
-        assert pytest.approx(sim, 0.001) == 1.0
-
-        # But incompatible with a Gemini 768-dim query
-        query_gemini = [0.05] * 768
-        assert not canonical_are_embeddings_compatible(query_gemini, legacy_emb)
-        assert canonical_cosine_similarity(query_gemini, legacy_emb) == 0.0
-
     @pytest.mark.asyncio
     async def test_offline_local_embedding_fallback(self):
         """Offline fallback produces 256-dim vector labeled as local_ngram_256."""
@@ -153,6 +181,63 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
         assert len(vec) == 256
         assert model_name == LOCAL_EMBEDDING_MODEL
         assert isinstance(vec[0], float)
+
+    @pytest.mark.asyncio
+    async def test_query_embedding_metadata_propagation(self):
+        """Query embedding carries explicit model metadata through rank_records to comparison guards."""
+        vec, model_name = await canonical_compute_embedding_with_model("test query")
+        assert model_name == LOCAL_EMBEDDING_MODEL
+
+        store = CanonicalVectorStore()
+        rec_matching = CanonicalRecord(
+            key="rec_match",
+            value="matching local record",
+            embedding=canonical_compute_local_embedding("matching local record"),
+            embedding_model=LOCAL_EMBEDDING_MODEL,
+        )
+        rec_unidentified = CanonicalRecord(
+            key="rec_unidentified",
+            value="unidentified model record",
+            embedding=[0.05] * 512,
+            embedding_model=None,
+        )
+
+        ranked = await store.rank_records("matching", [rec_matching, rec_unidentified])
+        assert len(ranked) > 0
+        assert ranked[0][0].key == "rec_match"
+
+    @pytest.mark.asyncio
+    async def test_new_embedding_metadata_persistence(self, tmp_path: Path):
+        """New records persist their embedding_model in memory and across disk JSON serialization."""
+        import json
+        storage_path = tmp_path / "model_persist_test.json"
+        storage = CanonicalStorage(storage_path=storage_path)
+        mgr = CanonicalManager(storage=storage)
+
+        rec = await mgr.store_memory(
+            key="user_ide_preference",
+            value="Visual Studio Code",
+            category=CanonicalCategory.APP_PREFERENCE,
+            tags=["ide", "editor"],
+        )
+        assert rec is not None
+        assert rec.embedding_model == LOCAL_EMBEDDING_MODEL
+        assert rec.embedding is not None
+        assert len(rec.embedding) == 256
+
+        # Verify disk file persistence of embedding_model
+        assert storage_path.exists()
+        disk_data = json.loads(storage_path.read_text(encoding="utf-8"))
+        saved_recs = disk_data.get("records", [])
+        persisted = next((r for r in saved_recs if r.get("key") == "user_ide_preference"), None)
+        assert persisted is not None
+        assert persisted.get("embedding_model") == LOCAL_EMBEDDING_MODEL
+
+        # Verify round-trip reload from storage
+        fresh_storage = CanonicalStorage(storage_path=storage_path)
+        reloaded = await fresh_storage.get(rec.id)
+        assert reloaded is not None
+        assert reloaded.embedding_model == LOCAL_EMBEDDING_MODEL
 
     @pytest.mark.asyncio
     async def test_retrieval_ranking_with_incompatible_vectors(self):
@@ -185,7 +270,7 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
         assert ranked_browser[0][0].key == "gemini_browser"
 
     def test_existing_json_data_compatibility_and_integrity(self):
-        """Verify real user memory records and backup match 100% in count, IDs, and categories."""
+        """Verify real user memory records and backup match in integrity and preserve all original records."""
         import json
         real_path = Path.home() / ".seyal_ai" / "seyal_memory.json"
         bak_path = Path.home() / ".seyal_ai" / "seyal_memory.json.bak"
@@ -194,10 +279,17 @@ class TestEmbeddingCompatibilityAndSemanticRecall:
             data_bak = json.loads(bak_path.read_text(encoding="utf-8"))
             recs_real = data_real.get("records", [])
             recs_bak = data_bak.get("records", [])
-            assert len(recs_real) == len(recs_bak)
-            assert [r["id"] for r in recs_real] == [r["id"] for r in recs_bak]
-            assert [r.get("category") for r in recs_real] == [r.get("category") for r in recs_bak]
-            assert [r.get("key") for r in recs_real] == [r.get("key") for r in recs_bak]
+            assert len(recs_bak) == 10
+            # Every original record from backup must exist in live storage with intact attributes
+            recs_real_by_id = {r["id"]: r for r in recs_real}
+            for bak_rec in recs_bak:
+                rec_id = bak_rec["id"]
+                assert rec_id in recs_real_by_id, f"Original record {rec_id} missing from live storage"
+                live_rec = recs_real_by_id[rec_id]
+                assert live_rec.get("category") == bak_rec.get("category")
+                assert live_rec.get("key") == bak_rec.get("key")
+                assert live_rec.get("value") == bak_rec.get("value")
+                assert live_rec.get("metadata") == bak_rec.get("metadata")
 
 
 class TestMemoryPersistenceAndCrossPathCRUD:

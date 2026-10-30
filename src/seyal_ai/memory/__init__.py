@@ -54,4 +54,20 @@ PrivacyLevel = _canonical_types.PrivacyLevel
 def __getattr__(name: str):
     return getattr(_canonical_memory, name)
 
-__all__ = _canonical_memory.__all__
+__all__ = [
+    "ContextResolver",
+    "MemoryManager",
+    "MemoryPrivacyFilter",
+    "MemoryStorage",
+    "SemanticVectorStore",
+    "compute_embedding",
+    "compute_embedding_with_model",
+    "compute_local_embedding",
+    "cosine_similarity",
+    "are_embeddings_compatible",
+    "infer_embedding_model",
+    "ContextState",
+    "MemoryCategory",
+    "MemoryRecord",
+    "PrivacyLevel",
+]
