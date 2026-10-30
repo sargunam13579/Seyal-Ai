@@ -128,3 +128,59 @@ async def execute_workflow(req: WorkflowExecutionRequest) -> dict[str, Any]:
         ],
         "data": res.final_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# Persistent Automations & Scheduled Routines
+# ---------------------------------------------------------------------------
+
+@router.get("/routines", summary="List all persistent automation routines")
+async def list_automation_routines() -> dict[str, Any]:
+    """Retrieve all scheduled and on-demand automation routines."""
+    from seyal_ai.automation.scheduler import get_automation_scheduler
+    scheduler = get_automation_scheduler()
+    routines = scheduler.load_routines()
+    return {"success": True, "routines": [r.model_dump() for r in routines]}
+
+
+@router.post("/routines", summary="Create or update an automation routine")
+async def save_automation_routine(routine_data: dict[str, Any]) -> dict[str, Any]:
+    """Save an automation routine to disk."""
+    from seyal_ai.automation.scheduler import AutomationRoutine, get_automation_scheduler
+    scheduler = get_automation_scheduler()
+    routines = scheduler.load_routines()
+
+    new_r = AutomationRoutine(**routine_data)
+    idx = next((i for i, r in enumerate(routines) if r.id == new_r.id), None)
+    if idx is not None:
+        routines[idx] = new_r
+    else:
+        routines.append(new_r)
+
+    scheduler.save_routines(routines)
+    return {"success": True, "routine": new_r.model_dump()}
+
+
+@router.post("/routines/{routine_id}/run", summary="Run an automation routine immediately")
+async def run_automation_routine(routine_id: str) -> dict[str, Any]:
+    """Trigger immediate execution of a scheduled routine."""
+    from seyal_ai.automation.scheduler import get_automation_scheduler
+    scheduler = get_automation_scheduler()
+    result = await scheduler.run_routine(routine_id)
+    return result
+
+
+@router.post("/routines/{routine_id}/toggle", summary="Toggle automation routine enabled state")
+async def toggle_automation_routine(routine_id: str, payload: dict[str, bool]) -> dict[str, Any]:
+    """Toggle enabled status of an automation routine."""
+    from seyal_ai.automation.scheduler import get_automation_scheduler
+    scheduler = get_automation_scheduler()
+    routines = scheduler.load_routines()
+    target = next((r for r in routines if r.id == routine_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Routine not found")
+
+    target.enabled = payload.get("enabled", not target.enabled)
+    scheduler.save_routines(routines)
+    return {"success": True, "routine": target.model_dump()}
+

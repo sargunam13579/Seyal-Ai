@@ -176,8 +176,11 @@ class TestBrowserInteraction:
         mock_page = AsyncMock()
         mock_locator = AsyncMock()
         mock_locator.is_visible.return_value = True
-        mock_page.locator.return_value.first = mock_locator
-        mock_page.get_by_text.return_value.first = mock_locator
+        mock_page.locator = MagicMock(return_value=MagicMock(first=mock_locator))
+        mock_page.get_by_text = MagicMock(return_value=MagicMock(first=mock_locator))
+        mock_page.get_by_role = MagicMock(return_value=MagicMock(first=mock_locator))
+        mock_page.get_by_placeholder = MagicMock(return_value=MagicMock(first=mock_locator))
+        mock_page.get_by_label = MagicMock(return_value=MagicMock(first=mock_locator))
 
         with patch.object(ctrl, "get_active_page", return_value=mock_page):
             interaction = BrowserInteraction(controller=ctrl)

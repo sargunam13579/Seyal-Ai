@@ -114,32 +114,142 @@ Revoke access for a paired device.
 
 ---
 
-## 5. Accessibility & Custom Commands (`/api/accessibility`)
+## 5. Model Context Protocol (MCP) Endpoints (`/api/mcp`)
+
+### `GET /api/mcp/servers`
+List all configured external MCP servers, status, connection type, and bridged tools.
+
+### `POST /api/mcp/servers`
+Register or update an MCP server configuration.
+- **Request Body**:
+  ```json
+  {
+    "id": "github",
+    "name": "GitHub MCP",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"},
+    "enabled": true
+  }
+  ```
+
+### `POST /api/mcp/servers/{server_id}/toggle`
+Enable or disable an MCP server connection.
+- **Request Body**: `{"enabled": true}`
+
+### `POST /api/mcp/servers/{server_id}/ping`
+Ping server and test connection latency.
+- **Response**: `{"success": true, "ping_ms": 14.2}`
+
+---
+
+## 6. Scheduled Automations & Routines (`/api/automation`)
+
+### `GET /api/automation/routines`
+List all scheduled and triggerable desktop automations.
+
+### `POST /api/automation/routines/{routine_id}/run`
+Trigger immediate execution of an automation routine in the background.
+
+### `POST /api/automation/routines/{routine_id}/toggle`
+Enable or disable scheduled trigger for a routine.
+
+---
+
+## 7. System Maintenance & Storage Footprint (`/api/system`)
+
+### `GET /api/system/storage/stats`
+Retrieve real-time storage disk footprint.
+- **Response**:
+  ```json
+  {
+    "storagePath": "C:\\Users\\user\\.seyal_ai",
+    "visionSize": 12.4,
+    "vectorSize": 4.1,
+    "audioSize": 8.0,
+    "logsSize": 1.2,
+    "totalUsedMb": 25.7,
+    "reclaimableMb": 21.6
+  }
+  ```
+
+### `POST /api/system/storage/clean`
+Trigger targeted storage cleanup.
+- **Request Body**: `{"type": "all"}` (options: `"vision"`, `"audio"`, `"logs"`, `"vacuum"`, `"all"`)
+
+### `POST /api/system/data/purge-conversations`
+Purge all conversation history while preserving core configuration.
+
+### `POST /api/system/data/wipe-knowledge`
+Wipe learned semantic memory and user knowledge attributes.
+
+### `POST /api/system/data/factory-reset`
+Nuclear factory reset restoring default application state.
+- **Request Body**: `{"confirm_nuclear": true}`
+
+---
+
+## 8. Notifications & Webhook Endpoints (`/api/notifications`)
+
+### `POST /api/notifications/test-webhook`
+Test delivery of an alert to a target Discord, Slack, Telegram, or custom webhook URL.
+- **Request Body**: `{"webhook_url": "https://discord.com/api/webhooks/..."}`
+- **Response**: `{"success": true, "statusCode": 204, "latencyMs": 142}`
+
+### `GET /api/notifications/history`
+Retrieve persistent historical notification audit log.
+
+### `DELETE /api/notifications/history`
+Clear historical notification event log.
+
+---
+
+## 9. Personalization Endpoints (`/api/personalization`)
+
+### `GET /api/personalization`
+Get active user communication tone, custom instructions, and behavioral settings.
+- **Response**:
+  ```json
+  {
+    "communicationTone": "action",
+    "customInstructions": "Prefer Tamil when speaking aloud, English when writing code.",
+    "proactiveSuggestions": true,
+    "languageAutoSwitching": true,
+    "conciseCodeOnly": false
+  }
+  ```
+
+### `PUT /api/personalization`
+Update user personalization settings and refresh runtime system prompts.
+
+---
+
+## 10. Safety Guardrails Endpoints (`/api/safety`)
+
+### `GET /api/safety`
+Get active safety profile (`zero_trust`, `balanced`, `developer`), blocked applications, and boundary rules.
+
+### `PUT /api/safety`
+Update safety policies, protected app list, and confirmation triggers.
+
+---
+
+## 11. Accessibility & Custom Commands (`/api/accessibility`)
 
 ### `GET /api/accessibility/commands`
 List all configured custom voice shortcuts and compound macros.
 
 ### `POST /api/accessibility/commands`
 Register a new custom voice command.
-- **Request Body**:
-  ```json
-  {
-    "phrase": "focus mode",
-    "actions": ["set volume 10", "close browser tabs", "mute notifications"],
-    "description": "Deep work mode"
-  }
-  ```
-
-### `DELETE /api/accessibility/commands/{phrase}`
-Remove a custom voice command.
 
 ### `POST /api/accessibility/audio/earcon`
 Play a test audio earcon chime (`wake`, `success`, `error`, `confirmation`, `emergency_stop`).
 
 ---
 
-## 6. Voice & Audio WebSocket
+## 12. Voice & Audio WebSocket
 
-### `WS /api/voice/stream`
-Full-duplex low-latency audio streaming for real-time STT and TTS streaming.
+### `WS /api/voice/ws`
+Full-duplex real-time audio streaming WebSocket with Silero VAD, acoustic barge-in interruption detection, and interim STT.
 - **Audio Format**: 16kHz, 16-bit Mono Linear PCM.
+- **Interruption Event**: Emits `{"event": "barge_in"}` immediately when acoustic speech is detected mid-playback.

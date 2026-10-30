@@ -65,15 +65,6 @@ voice = [
     "SpeechRecognition>=3.10.0",
     "vosk>=0.3.45",
 ]
-android = [
-    "pure-python-adb>=0.3.0",
-    "grpcio>=1.66.0",
-    "grpcio-tools>=1.66.0",
-    "protobuf>=5.28.0",
-]
-memory = [
-    "chromadb>=0.5.0",
-]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",

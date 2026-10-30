@@ -12,6 +12,7 @@ from seyal_ai.api.routes import (
     health,
     identity,
     laptop,
+    mcp_api,
     memory,
     pairing_api,
     permissions_api,
@@ -20,6 +21,8 @@ from seyal_ai.api.routes import (
     user_hub,
     vision,
     voice,
+    notifications,
+    system_maintenance,
 )
 
 __all__ = [
@@ -34,10 +37,13 @@ __all__ = [
     "health",
     "identity",
     "laptop",
+    "mcp_api",
     "memory",
+    "notifications",
     "pairing_api",
     "permissions_api",
     "profile",
+    "system_maintenance",
     "tasks",
     "user_hub",
     "vision",

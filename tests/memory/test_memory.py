@@ -590,3 +590,31 @@ class TestSeyalAiBrainMemoryIntegration:
             assert recalled is not None
             assert recalled.value == "D:/Projects"
 
+    @pytest.mark.asyncio
+    async def test_mem14_semantic_vector_recall(self, tmp_path: Path):
+        """Validate true semantic vector ranking retrieves records on conceptual paraphrases."""
+        storage_file = tmp_path / "semantic_memory.json"
+        storage = MemoryStorage(storage_path=storage_file)
+
+        # Store memory about project folder
+        await storage.store(
+            key="java_projects_dir",
+            value="D:/Development/Repositories/JavaApp",
+            category=MemoryCategory.USER_PREFERENCE,
+            tags=["development", "repository", "workspace"],
+        )
+
+        # Store an unrelated memory
+        await storage.store(
+            key="favorite_food",
+            value="Biryani",
+            category=MemoryCategory.USER_DEFINED_INFO,
+            tags=["food", "lunch"],
+        )
+
+        # Semantic query without exact keyword matches
+        results = await storage.search(query="Where is my coding workspace?", limit=1)
+        assert len(results) == 1
+        assert results[0].key == "java_projects_dir"
+        assert "Development" in str(results[0].value)
+

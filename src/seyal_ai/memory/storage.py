@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
+import time
 from typing import Any
 
 from seyal_ai.core.config import get_settings
 from seyal_ai.memory.privacy import MemoryPrivacyFilter
 from seyal_ai.memory.types import MemoryCategory, MemoryRecord, PrivacyLevel
+from seyal_ai.memory.vector_store import SemanticVectorStore, compute_embedding
 from seyal_ai.utils.logging import get_logger
 
 log = get_logger("memory.storage")
@@ -35,6 +38,7 @@ class MemoryStorage:
             self._path = settings.resolved_data_dir / "seyal_memory.json"
 
         self._privacy_filter = privacy_filter or MemoryPrivacyFilter()
+        self._vector_store = SemanticVectorStore()
         self._records: dict[str, MemoryRecord] = {}  # id -> record
         self._lock = asyncio.Lock()
         self._loaded = False
@@ -78,7 +82,8 @@ class MemoryStorage:
             self.load()
 
     def save(self) -> None:
-        """Save records to disk."""
+        """Save records to disk atomically with retry on Windows file lock."""
+        temp_path: Path | None = None
         try:
             self._ensure_dir()
             payload = {
@@ -86,11 +91,37 @@ class MemoryStorage:
                 "total": len(self._records),
                 "records": [r.to_dict() for r in self._records.values()],
             }
-            temp_path = self._path.with_suffix(".tmp")
+            temp_path = self._path.with_suffix(f".tmp.{os.getpid()}")
             temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            temp_path.replace(self._path)
+
+            # Windows Defender or file indexers may momentarily hold a read lock.
+            # Retry atomic replace with exponential backoff.
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    temp_path.replace(self._path)
+                    temp_path = None  # Replaced successfully
+                    break
+                except (PermissionError, OSError) as err:
+                    if attempt == max_retries - 1:
+                        try:
+                            if self._path.exists():
+                                self._path.unlink()
+                            temp_path.replace(self._path)
+                            temp_path = None
+                            break
+                        except Exception:
+                            log.error("Failed to replace memory file after %d attempts: %s", max_retries, err)
+                            raise
+                    time.sleep(0.05 * (2**attempt))
         except Exception as e:
             log.error("Failed to save memory records to %s: %s", self._path, e)
+        finally:
+            if temp_path is not None and temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception:
+                    pass
 
     async def store(
         self,
@@ -144,6 +175,15 @@ class MemoryStorage:
                 )
                 self._records[record.id] = record
 
+            # Compute and attach vector embedding for semantic indexing
+            rep_text = f"{clean_key} {clean_value} {' '.join(record.tags)}"
+            try:
+                emb = await compute_embedding(rep_text)
+                record.embedding = emb
+                await self._vector_store.get_or_create_embedding(record.id, rep_text, emb)
+            except Exception as emb_err:
+                log.debug("Vector embedding computation notice: %s", emb_err)
+
             self.save()
             log.info("Stored memory [%s] '%s'", category.value, clean_key)
             return record
@@ -184,34 +224,26 @@ class MemoryStorage:
         tags: list[str] | None = None,
         limit: int = 20,
     ) -> list[MemoryRecord]:
-        """Search memory records by query keywords, category, or tags."""
+        """Search memory records by semantic relevance, query keywords, category, or tags."""
         await self.ensure_loaded()
         q_clean = query.lower().strip()
         tag_set = {t.lower().strip() for t in (tags or [])}
 
-        results: list[MemoryRecord] = []
         async with self._lock:
+            candidates: list[MemoryRecord] = []
             for rec in self._records.values():
                 if category and rec.category != category:
                     continue
-
                 if tag_set and not any(t.lower() in tag_set for t in rec.tags):
                     continue
+                candidates.append(rec)
 
-                if q_clean:
-                    val_str = str(rec.value).lower()
-                    key_str = rec.key.lower()
-                    tag_str = " ".join(rec.tags).lower()
+            if not q_clean:
+                return candidates[:limit]
 
-                    if q_clean in key_str or q_clean in val_str or q_clean in tag_str:
-                        results.append(rec)
-                else:
-                    results.append(rec)
-
-                if len(results) >= limit:
-                    break
-
-        return results
+            # True Semantic Vector + Keyword Hybrid Ranking
+            ranked = await self._vector_store.rank_records(q_clean, candidates, limit=limit)
+            return [r for r, _ in ranked]
 
     async def list_by_category(self, category: MemoryCategory) -> list[MemoryRecord]:
         """List all memories in a category."""
@@ -224,6 +256,7 @@ class MemoryStorage:
             # Try by ID first
             if record_id_or_key in self._records:
                 del self._records[record_id_or_key]
+                self._vector_store.evict(record_id_or_key)
                 self.save()
                 return True
 
@@ -233,6 +266,7 @@ class MemoryStorage:
             if to_delete:
                 for rid in to_delete:
                     del self._records[rid]
+                    self._vector_store.evict(rid)
                 self.save()
                 return True
 
@@ -246,10 +280,12 @@ class MemoryStorage:
                 to_remove = [r.id for r in self._records.values() if r.category == category]
                 for rid in to_remove:
                     del self._records[rid]
+                    self._vector_store.evict(rid)
                 count = len(to_remove)
             else:
                 count = len(self._records)
                 self._records.clear()
+                self._vector_store.clear()
 
             self.save()
             log.info("Cleared %d memory records (category=%s)", count, category)

@@ -29,10 +29,15 @@ from seyal_ai.api.routes import (
     health,
     identity,
     laptop,
+    mcp_api,
     memory,
+    notifications,
     pairing_api,
     permissions_api,
+    personalization,
     profile,
+    safety_api,
+    system_maintenance,
     tasks,
     user_hub,
     vision,
@@ -181,6 +186,11 @@ def create_app(settings: SeyalAiSettings | None = None) -> FastAPI:
     app.include_router(computer_use.router, prefix=prefix)
     app.include_router(awareness_api.router, prefix=prefix)
     app.include_router(user_hub.router, prefix=prefix)
+    app.include_router(mcp_api.router, prefix=prefix)
+    app.include_router(system_maintenance.router, prefix=prefix)
+    app.include_router(notifications.router, prefix=prefix)
+    app.include_router(personalization.router, prefix=prefix)
+    app.include_router(safety_api.router, prefix=prefix)
 
     # Root redirect to docs
     @app.get("/", include_in_schema=False)

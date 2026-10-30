@@ -9,26 +9,17 @@ export const AutomationsView: React.FC = () => {
   const [goalText, setGoalText] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string[] | null>(null);
+  const [routines, setRoutines] = useState<any[]>([]);
 
-  const presetWorkflows = [
-    {
-      title: 'Workstation System Diagnostics',
-      desc: 'Check CPU load, available tools, memory status, and log report.',
-      steps: ['Get System Info', 'Query Volume Level', 'Verify DB Integrity'],
-    },
-    {
-      title: 'Screen Capture & Analysis Pipeline',
-      desc: 'Capture active window snapshot and inspect running desktop layout.',
-      steps: ['Capture Screenshot', 'Analyze Window Dimensions', 'Store in Memory'],
-    },
-    {
-      title: 'Cross-Device Handoff Routine',
-      desc: 'Sync active workspace URLs and state to mobile companion.',
-      steps: ['Capture Active URLs', 'Package State Payload', 'Dispatch Handoff'],
-    },
-  ];
+  React.useEffect(() => {
+    api.getAutomationRoutines().then((data) => {
+      if (Array.isArray(data) && data.length > 0) {
+        setRoutines(data);
+      }
+    }).catch((e) => console.warn('Could not fetch routines:', e));
+  }, []);
 
-  const handleRunAutomation = async (customGoal?: string, presetSteps?: string[]) => {
+  const handleRunAutomation = async (customGoal?: string, presetSteps?: string[], routineId?: string) => {
     const goal = (customGoal || goalText).trim();
     if (!goal) return;
 
@@ -56,18 +47,37 @@ export const AutomationsView: React.FC = () => {
     });
 
     try {
-      const res = await api.sendMessage(`Please plan and execute this task: ${goal}`);
-      setCurrentPlan((prev) => [
-        ...(prev || []),
-        'Execution completed successfully:',
-        res.response,
-      ]);
-      addActivity({
-        type: 'tool_exec',
-        title: 'Plan Completed',
-        detail: res.response.slice(0, 100),
-        status: 'success',
-      });
+      if (routineId) {
+        const res = await api.runAutomationRoutine(routineId);
+        if (res.success) {
+          setCurrentPlan((prev) => [
+            ...(prev || []),
+            `✓ Execution completed (${res.execution_seconds}s):`,
+            res.output,
+          ]);
+          addActivity({
+            type: 'tool_exec',
+            title: `Routine Completed: ${res.title}`,
+            detail: res.output.slice(0, 100),
+            status: 'success',
+          });
+        } else {
+          throw new Error(res.error || 'Execution failed');
+        }
+      } else {
+        const res = await api.sendMessage(`Please plan and execute this task: ${goal}`);
+        setCurrentPlan((prev) => [
+          ...(prev || []),
+          'Execution completed successfully:',
+          res.response,
+        ]);
+        addActivity({
+          type: 'tool_exec',
+          title: 'Plan Completed',
+          detail: res.response.slice(0, 100),
+          status: 'success',
+        });
+      }
     } catch (err: any) {
       setCurrentPlan((prev) => [
         ...(prev || []),
@@ -127,12 +137,25 @@ export const AutomationsView: React.FC = () => {
             </span>
 
             <div className="space-y-2">
-              {presetWorkflows.map((wf, idx) => (
+              {(routines.length > 0 ? routines : [
+                {
+                  id: 'sys_diagnostics',
+                  title: 'Workstation System Diagnostics',
+                  desc: 'Check CPU load, available tools, memory status, and log report.',
+                  steps: ['Get System Info', 'Query Volume Level', 'Verify DB Integrity'],
+                },
+                {
+                  id: 'screen_pipeline',
+                  title: 'Screen Capture & Analysis Pipeline',
+                  desc: 'Capture active window snapshot and inspect running desktop layout.',
+                  steps: ['Capture Screenshot', 'Analyze Window Dimensions', 'Store in Memory'],
+                },
+              ]).map((wf, idx) => (
                 <div
                   key={idx}
                   onClick={() => {
                     setGoalText(wf.title);
-                    handleRunAutomation(wf.title, wf.steps);
+                    handleRunAutomation(wf.title, wf.steps, wf.id);
                   }}
                   className="p-3 rounded-lg bg-slate-900/60 border border-slate-800 hover:border-cyan-400/40 cursor-pointer transition-all space-y-1 group"
                 >

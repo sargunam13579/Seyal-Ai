@@ -100,7 +100,7 @@ def setup_logging(
         logger.addHandler(file_handler)
 
     # Suppress noisy third-party loggers
-    for noisy in ("httpx", "httpcore", "chromadb", "sqlalchemy.engine"):
+    for noisy in ("httpx", "httpcore", "sqlalchemy.engine"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     _configured = True

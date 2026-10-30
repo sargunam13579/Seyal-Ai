@@ -205,6 +205,7 @@ __all__ = [
     # Basic
     "GetCurrentTimeTool",
     "GetSystemInfoTool",
+    "GetWeatherTool",
     "SetVolumeTool",
     "SearchWebTool",
     "get_starter_tools",

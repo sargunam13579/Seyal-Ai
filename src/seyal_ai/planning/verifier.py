@@ -37,8 +37,8 @@ class ResultVerifier:
         if isinstance(result_output, Path) or (
             isinstance(result_output, str)
             and len(result_output) < 300
-            and os.path.exists(str(result_output))
-            and os.path.isfile(str(result_output))
+            and os.path.exists(result_output)
+            and os.path.isfile(result_output)
         ):
             path = Path(result_output)
             if path.exists():

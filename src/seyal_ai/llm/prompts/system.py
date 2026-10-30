@@ -65,6 +65,7 @@ def build_system_prompt(
     allow_tools: bool = True,
     mother_tongue: str | None = None,
     known_languages: list[str] | None = None,
+    personalization_snippet: str | None = None,
 ) -> str:
     """
     Build the full system prompt with dynamic context injected.
@@ -78,6 +79,7 @@ def build_system_prompt(
         allow_tools: Whether tool/system access is allowed.
         mother_tongue: User's mother tongue.
         known_languages: User's permitted languages.
+        personalization_snippet: User-configured custom instructions and tone directives.
 
     Returns:
         The complete system prompt string.
@@ -94,6 +96,9 @@ def build_system_prompt(
 
     # Strict language guardrail
     parts.append(build_language_guardrail_prompt(mother_tongue, known_languages))
+
+    if personalization_snippet:
+        parts.append(f"\n{personalization_snippet.strip()}")
 
     if device_context:
         parts.append(f"\n## Device State\n{device_context}")

@@ -88,7 +88,7 @@ class TestAcousticEchoAndDeduplicationRegression:
         def is_echo(user_transcript: str) -> bool:
             norm_user = normalize(user_transcript)
             # 1. Exact or substring echo of assistant output
-            return bool(norm_user in norm_assistant or norm_assistant in norm_user)
+            return norm_user in norm_assistant or norm_assistant in norm_user
 
         # Exact echo from microphone
         assert is_echo("Good morning Friend, I am ready") is True

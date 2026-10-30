@@ -18,7 +18,7 @@ def test_supabase_jwt_decoding_unverified():
         "aud": "authenticated",
         "exp": 2524608000,  # far future timestamp
     }
-    token = jwt.encode(payload, "secret123", algorithm="HS256")
+    token = jwt.encode(payload, "test-supabase-super-secret-key-at-least-32-bytes!", algorithm="HS256")
 
     decoded = decode_supabase_jwt(token, secret="", verify_signature=False)
     assert decoded is not None
@@ -27,7 +27,7 @@ def test_supabase_jwt_decoding_unverified():
 
 
 def test_supabase_jwt_decoding_verified():
-    secret = "my-supabase-super-secret"
+    secret = "my-supabase-super-secret-key-32-bytes-long!"
     payload = {
         "sub": "user-456-def",
         "email": "hero@seyal_ai.ai",

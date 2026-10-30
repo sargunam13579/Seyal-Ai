@@ -21,6 +21,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
   setPassword: (newPassword: string) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
+  signInAsLocalGuest: () => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -28,6 +29,16 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const getCachedSession = (): Session | null => {
   try {
+    const localGuest = localStorage.getItem('seyal_local_guest_session');
+    if (localGuest) {
+      try {
+        const parsed = JSON.parse(localGuest);
+        if (parsed?.access_token && parsed?.user) {
+          return parsed as Session;
+        }
+      } catch {}
+    }
+
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && (key.startsWith('sb-') || key.includes('supabase')) && key.endsWith('-auth-token')) {
@@ -49,6 +60,26 @@ const getCachedSession = (): Session | null => {
   return null;
 };
 
+const PRESERVED_USER_PREFERENCES = new Set([
+  'seyal_theme',
+  'seyal_mic_muted',
+  'seyal_auto_listen',
+  'seyal_recognition_lang',
+  'seyal_speech_speed',
+  'seyal_selected_voice',
+  'seyal_storage_config',
+  'seyal_security_config',
+  'seyal_safety_config',
+  'seyal_personalization_config',
+  'seyal_notification_config',
+  'seyal_notif_history',
+  'seyal_pinned_actions',
+  'seyal_sidebar_collapsed',
+  'seyal_simple_sidebar_collapsed',
+  'seyal_convo_sidebar_collapsed',
+  'seyal_active_view',
+]);
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(() => getCachedSession());
   const [user, setUser] = useState<User | null>(() => {
@@ -66,13 +97,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
+        if (!k || PRESERVED_USER_PREFERENCES.has(k)) continue;
         if (
-          k &&
-          (k.startsWith('sb-') ||
-            k.includes('supabase') ||
-            k.includes('auth-token') ||
-            k.startsWith('seyal_') ||
-            k.startsWith('seyal_'))
+          k.startsWith('sb-') ||
+          k.includes('supabase') ||
+          k.includes('auth-token') ||
+          k === 'seyal_local_guest_session' ||
+          k === 'seyal_agent_conv_cache' ||
+          k === 'seyal_user_avatar' ||
+          k === 'seyal_pinned_agent_task_ids' ||
+          k === 'seyal_pinned_conversation_ids'
         ) {
           keysToRemove.push(k);
         }
@@ -273,17 +307,66 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        queryParams: {
-          prompt: 'select_account',
-          access_type: 'offline',
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          queryParams: {
+            prompt: 'select_account',
+            access_type: 'offline',
+          },
+          redirectTo: window.location.origin,
+          skipBrowserRedirect: true, // Prevents Electron webview from replacing the local app with a blank page
         },
-        redirectTo: window.location.origin,
-      },
-    });
-    return { error };
+      });
+
+      if (error) {
+        return { error };
+      }
+
+      if (data?.url) {
+        const electronApi = (window as any).electronAPI;
+        if (electronApi?.openExternalUrl) {
+          await electronApi.openExternalUrl(data.url);
+        } else {
+          window.open(data.url, '_blank');
+        }
+      }
+      return { error: null };
+    } catch (err: any) {
+      console.error('[AUTH] Google Sign-In error:', err);
+      return {
+        error: new Error(
+          err?.message?.includes('Failed to fetch') || err?.message?.includes('network')
+            ? 'Supabase server domain could not be resolved (offline or paused). You can continue in Local Mode below.'
+            : err?.message || 'Google sign-in failed.'
+        ),
+      };
+    }
+  };
+
+  const signInAsLocalGuest = async () => {
+    const guestUser: User = {
+      id: 'local-guest-user-0000',
+      app_metadata: { provider: 'local' },
+      user_metadata: { name: 'User', mother_tongue: 'ta-IN', known_languages: ['ta-IN', 'en-IN'] },
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+      email: 'user@seyal.local',
+    } as User;
+
+    const guestSession: Session = {
+      access_token: 'local-offline-session-token',
+      token_type: 'bearer',
+      expires_in: 31536000,
+      refresh_token: 'local-offline-refresh-token',
+      user: guestUser,
+    };
+
+    localStorage.setItem('seyal_local_guest_session', JSON.stringify(guestSession));
+    setSession(guestSession);
+    setUser(guestUser);
+    setLoading(false);
   };
 
   const signOut = async () => {
@@ -306,6 +389,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetPassword,
         setPassword,
         signInWithGoogle,
+        signInAsLocalGuest,
       }}
     >
       {children}

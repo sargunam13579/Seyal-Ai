@@ -63,6 +63,15 @@ class ScreenCaptureController:
 
     def __init__(self, privacy_manager: ScreenPrivacyManager | None = None) -> None:
         self.privacy = privacy_manager or ScreenPrivacyManager()
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                try:
+                    ctypes.windll.shcore.SetProcessDpiAwareness(2)
+                except Exception:
+                    ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
     def get_active_window_info(self) -> WindowInfo | None:
         """Get the title, process, and bounding box of the active foreground window."""

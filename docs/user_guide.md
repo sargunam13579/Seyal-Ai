@@ -18,6 +18,9 @@ seyal_ai voice
 
 # 3. Background REST & WebSocket Server
 seyal_ai serve --port 8000
+
+# 4. Desktop Electron App (Full UI)
+npm run dev
 ```
 
 ---
@@ -25,7 +28,7 @@ seyal_ai serve --port 8000
 ## 2. Voice & Hands-Free Interaction
 
 ### Default Wake Word & Naming
-- **Wake Word**: Say *"Seyal AI"* followed by your command.
+- **Wake Word**: Say *"Seyal AI"* or *"Hey Seyal"* followed by your command.
 - **Renaming the Assistant**:
   Say: *"Seyal AI, call yourself Aria"* or *"Seyal AI, change your name to Maya"*.
   Seyal AI will ask for confirmation: *"Do you want me to change my name to Aria?"*.
@@ -38,6 +41,9 @@ Seyal AI provides non-visual auditory feedback:
 - **Low Tone**: Error or retry in progress.
 - **Alert Beep**: Risky action requires confirmation.
 - **Warble Tone**: Emergency stop triggered.
+
+### Acoustic Interruption (Barge-In)
+When Seyal AI is speaking, you can interrupt naturally simply by speaking. The neural Voice Activity Detector (VAD) detects speech, mutes output immediately, and captures your new turn.
 
 ---
 
@@ -58,7 +64,7 @@ Seyal AI can understand complex, multi-step user goals, decompose them into step
 
 ---
 
-## 4. Emergency Stop & Cancellation
+## 4. Emergency Stop & Universal Kill Switch
 
 Safety and user control are fundamental in Seyal AI:
 
@@ -71,31 +77,95 @@ Safety and user control are fundamental in Seyal AI:
 
 ---
 
-## 5. Permissions & Security
+## 5. Personalization & Communication Tones
 
-Seyal AI implements granular capability scopes:
+Customize how Seyal AI communicates and reasons to match your preferred workflow:
+
+### Available Tones:
+- **Action-First Operator (`action`)**: Ultra-concise, immediate execution with zero conversational fluff.
+- **Executive Advisor (`executive`)**: Structured high-level executive summaries, risk assessments, and strategic action items.
+- **Pair-Programmer Copilot (`copilot`)**: Technical partner providing modular code, architecture notes, and testing patterns.
+- **Technical Mentor (`mentor`)**: Detailed educational explanations, step-by-step guidance, and deep dives.
+
+### Custom Prompt Directives:
+Add custom guidelines like:
+> *"Prefer Tamil when speaking aloud, English when writing code. Always write modular Python & TypeScript. Prefer PowerShell syntax for Windows commands."*
+
+---
+
+## 6. Scheduled Automations & Daily Desktop Routines
+
+Schedule repetitive tasks to run automatically in the background without needing manual prompting:
+- **Pre-configured Routines**:
+  - *Workstation System Diagnostics*: Daily health check on CPU, disk, tools, and memory.
+  - *Workspace Maintenance & Git Hygiene*: Weekly cleanup of temporary artifacts and status review.
+- **Custom Schedules**:
+  - Set daily runs at specific times (e.g. `09:00`) or recurring minute intervals (e.g. every `60` minutes).
+  - Manage routines directly in the desktop app UI or via `/api/automation/routines`.
+
+---
+
+## 7. Connecting External Tools via MCP (Model Context Protocol)
+
+Seyal AI natively supports the Model Context Protocol, enabling you to plug in external tools seamlessly:
+- **GitHub MCP Server**: Manage PRs, issues, and code directly through voice commands.
+- **Brave Search MCP**: Add real-time live web research.
+- **SQLite & Postgres MCP**: Query databases using natural language.
+- Connect any stdio-based MCP server through the UI or `~/.seyal_ai/mcp_servers.json`.
+
+---
+
+## 8. Safety Guardrails & Protecting Sensitive Windows
+
+Seyal AI provides enterprise-grade safety guardrails to ensure autonomous actions never endanger personal data:
+- **Password Manager Protection**: Automatically detects and blocks synthetic mouse or keyboard interactions with Bitwarden, 1Password, KeePass, or LastPass.
+- **Payment Gateway Blocking**: Intercepts checkout and credit card forms, preventing unauthorized financial transactions.
+- **System Boundary Enforcement**: Blocks modifications to Windows system files (`C:\Windows\System32`).
+- **PII Masking**: API keys, credentials, and payment card numbers are automatically masked in all UI logs and terminal telemetry.
+
+---
+
+## 9. Storage Footprint & System Maintenance
+
+Keep your machine clean with built-in storage management:
+- **Live Footprint Analytics**: See exact disk usage across vision frames, audio cache, ChromaDB vectors, and logs.
+- **One-Click Cleanup**: Safely reclaim disk space by purging temporary vision frames and audio recordings.
+- **Database Optimization**: Compact and optimize SQLite database performance via `VACUUM`.
+- **Data Privacy**: Purge conversation histories, wipe knowledge attributes, or execute a factory reset.
+
+---
+
+## 10. Multilingual Computer-Use Shortcuts (Tamil & English)
+
+Seyal AI recognizes conversational and local voice shortcuts for instant OS control:
+- *"desktop kaatu"* / *"டெஸ்க்டாப் காட்டு"* / *"show desktop"* ➔ Minimize all windows (`Win+D`)
+- *"window moodu"* / *"விண்டோவை மூடு"* / *"close app"* ➔ Close foreground window (`Alt+F4`)
+- *"lock pannu"* / *"lock computer"* ➔ Lock workstation (`Win+L`)
+- *"task manager"* ➔ Open Windows Task Manager (`Ctrl+Shift+Esc`)
+
+---
+
+## 11. Permissions & Security
+
+Seyal AI isolates hardware and sensitive system capabilities into distinct permission scopes:
 - `microphone`: Audio listening and voice recording
 - `camera`: Camera capture and visual OCR
 - `screen_capture`: Screen analysis and multimodal vision
 - `file_access`: Local file reading, writing, and conversion
-- `notifications`: System alert banners
+- `notifications`: Desktop alert banners
 - `accessibility`: UI tree inspection and input automation
-- `device_control`: Android ADB and cross-device actions
+- `device_control`: Android ADB and cross-device tools
 
-### Viewing & Revoking Permissions:
 ```powershell
-# Via CLI
+# View and toggle permissions via CLI
 seyal_ai permissions list
 seyal_ai permissions revoke camera
 seyal_ai permissions grant camera
-
-# Via REST API
-curl -X POST http://localhost:8000/api/permissions/revoke -H "Content-Type: application/json" -d '{"scope": "camera"}'
 ```
 
 ---
 
-## 6. Device Pairing (Cross-Device)
+## 12. Device Pairing (Cross-Device)
 
 Pair your Android phone or secondary laptop with Seyal AI:
 
@@ -114,19 +184,7 @@ Pair your Android phone or secondary laptop with Seyal AI:
 
 ---
 
-## 7. Custom Voice Commands & Macros
-
-Define custom voice shortcuts for frequent multi-step workflows:
-
-```powershell
-# Example: Create "Focus Mode" shortcut
-seyal_ai accessibility create-command --phrase "focus mode" --actions "set volume 10, close browser tabs, mute notifications"
-```
-Whenever you say *"Seyal AI, enter focus mode"*, Seyal AI will execute all specified actions automatically.
-
----
-
-## 8. Offline Mode Fallback
+## 13. Offline Mode Fallback
 
 When disconnected from the internet or if cloud LLM endpoints are unreachable, Seyal AI automatically falls back to local deterministic execution:
 - Open desktop applications (*"open notepad"*, *"open chrome"*)

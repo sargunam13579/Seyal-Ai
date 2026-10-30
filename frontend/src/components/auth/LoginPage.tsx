@@ -31,6 +31,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ isModal = false, onClose, 
     setPassword: updateAccountPassword,
     resetPassword,
     signInWithGoogle,
+    signInAsLocalGuest,
   } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [showTryAnotherWay, setShowTryAnotherWay] = useState(false);
@@ -702,13 +703,32 @@ export const LoginPage: React.FC<LoginPageProps> = ({ isModal = false, onClose, 
               </div>
             )}
           </form>
+
+          {/* Local-First Mode / Offline Guest Access */}
+          <div className="mt-4 pt-3 border-t border-slate-800/60 text-center">
+            <button
+              type="button"
+              onClick={async () => {
+                await signInAsLocalGuest();
+                onSuccess?.();
+                onClose?.();
+              }}
+              className="w-full py-2.5 px-3 rounded-xl bg-slate-800/60 hover:bg-slate-800/90 border border-slate-700/60 hover:border-cyan-500/50 text-slate-300 hover:text-cyan-200 text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm group"
+            >
+              <span className="text-cyan-400 group-hover:scale-110 transition-transform">⚡</span>
+              <span>Continue in Local Mode (Offline SQLite)</span>
+            </button>
+            <p className="text-[10px] text-slate-500 mt-1.5">
+              Launch Seyal AI directly without cloud authentication
+            </p>
+          </div>
         </div>
       )}
 
       {/* Footer security info */}
       <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-center gap-2 text-[11px] text-slate-500">
         <ShieldCheck className="w-4 h-4 text-cyan-400" />
-        <span>Secured by Supabase Authentication & Real Gmail Verification</span>
+        <span>Local-First SQLite & Supabase Authentication</span>
       </div>
     </div>
   );

@@ -96,32 +96,47 @@ class VoiceActivityDetector:
         self._load_vad_model()
 
     def _load_vad_model(self) -> None:
-        """Attempt to load the Silero VAD model without blocking on interactive prompts."""
+        """Attempt to load the Silero VAD model without blocking on internet or interactive prompts."""
         try:
             import importlib
+            import os
 
             torch: Any = importlib.import_module("torch")
-
-            # Check if cached locally to avoid hanging on internet or trust prompts
             hub_load_fn: Any = torch.hub.load
-            hub_result: Any = hub_load_fn(
-                repo_or_dir="snakers4/silero-vad",
-                model="silero_vad",
-                trust_repo=True,
-                verbose=False,
-            )
+
+            # 1. Fast offline local cache check: eliminate internet roundtrips and timeouts
+            hub_dir = torch.hub.get_dir()
+            local_master = os.path.join(hub_dir, "snakers4_silero-vad_master")
+            if os.path.isdir(local_master) and os.path.exists(os.path.join(local_master, "hubconf.py")):
+                hub_result: Any = hub_load_fn(
+                    repo_or_dir=local_master,
+                    model="silero_vad",
+                    trust_repo=True,
+                    source="local",
+                    verbose=False,
+                )
+            else:
+                hub_result = hub_load_fn(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    trust_repo=True,
+                    verbose=False,
+                )
+
             if isinstance(hub_result, (tuple, list)):
                 self._silero_model = hub_result[0]
             else:
                 self._silero_model = hub_result
             self._use_silero = True
-            log.info("Silero VAD model loaded successfully")
+            log.info("Silero Neural VAD model loaded successfully (source: %s)", "local_cache" if os.path.isdir(local_master) else "hub")
         except Exception as e:
-            log.debug("Silero VAD not loaded (%s), using calibrated energy hysteresis detection", e)
+            log.debug("Silero VAD not loaded (%s), using calibrated acoustic spectral hysteresis", e)
             self._use_silero = False
 
     def _compute_energy(self, chunk: np.ndarray) -> float:
         """Compute the RMS energy of an audio chunk."""
+        if chunk is None or len(chunk) == 0:
+            return 0.0
         if chunk.dtype == np.int16:
             chunk_float = chunk.astype(np.float32) / 32768.0
         else:
@@ -130,7 +145,7 @@ class VoiceActivityDetector:
 
     def _run_silero(self, chunk: np.ndarray) -> float:
         """Run Silero VAD on a chunk, returning the speech probability."""
-        if not self._use_silero or self._silero_model is None:
+        if not self._use_silero or self._silero_model is None or chunk is None or len(chunk) == 0:
             return 0.0
 
         try:
@@ -166,6 +181,9 @@ class VoiceActivityDetector:
         Returns:
             Current VAD state (IDLE, SPEECH, or SILENCE).
         """
+        if chunk is None or len(chunk) == 0:
+            return self._state
+
         now = time.time()
         chunk_ms = (len(chunk) / self._sample_rate) * 1000.0 if self._sample_rate > 0 else 0.0
         energy = self._compute_energy(chunk)
@@ -179,16 +197,18 @@ class VoiceActivityDetector:
             self._pending_callback = False
 
         # Dynamic Hysteresis:
-        # If already speaking, use sustain threshold (prevents soft consonants like 'p', 'k', 'th' from cutting off)
-        # If idle, use speech start threshold (prevents ambient fan/noise triggers)
-        if self._state == VADState.SPEECH:
+        # Pre-filter: if energy is below baseline threshold, skip neural compute for instant throughput
+        if energy < min(self._sustain_energy_threshold, self._energy_threshold):
+            is_speech = False
+        elif self._state == VADState.SPEECH:
             is_speech = energy >= self._sustain_energy_threshold
             if not is_speech and self._use_silero:
                 prob = self._run_silero(chunk)
                 is_speech = prob >= (self._threshold * 0.7)
         else:
             is_speech = energy >= self._energy_threshold
-            if is_speech and self._use_silero:
+            # For low-energy ambient sounds (< 400 RMS, typical fan/room noise), verify human vocal formants with Silero
+            if is_speech and self._use_silero and energy < 400:
                 prob = self._run_silero(chunk)
                 is_speech = prob >= self._threshold
 

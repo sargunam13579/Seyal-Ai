@@ -81,7 +81,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    excludes=['tkinter', 'matplotlib', 'pandas', 'scipy'],
+    excludes=['tkinter', 'matplotlib', 'pandas', 'scipy', 'chromadb', 'grpcio', 'grpc'],
     noarchive=False,
     optimize=0,
 )

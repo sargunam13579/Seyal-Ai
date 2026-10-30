@@ -26,7 +26,11 @@ def _safe_emit(coro: Any) -> None:
         loop = asyncio.get_running_loop()
         loop.create_task(coro)
     except RuntimeError:
-        pass
+        if hasattr(coro, "close"):
+            try:
+                coro.close()
+            except Exception:
+                pass
 
 
 class ProgressTracker:

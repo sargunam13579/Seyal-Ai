@@ -246,7 +246,6 @@ class SeyalAiSettings(BaseSettings):
         data = self.resolved_data_dir
         data.mkdir(parents=True, exist_ok=True)
         (data / "logs").mkdir(exist_ok=True)
-        (data / "chromadb").mkdir(exist_ok=True)
         (data / "screenshots").mkdir(exist_ok=True)
         (data / "recordings").mkdir(exist_ok=True)
 

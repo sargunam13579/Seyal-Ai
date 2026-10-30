@@ -36,6 +36,21 @@ ipcMain.handle('open-app', async (_event, appName) => {
   }
 });
 
+// Safe external browser launcher for OAuth and external documentation links
+ipcMain.handle('open-external-url', async (_event, url) => {
+  try {
+    const { shell } = require('electron');
+    if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('Failed to open external url:', err);
+    return false;
+  }
+});
+
 // Always on top toggle
 ipcMain.handle('set-always-on-top', (_event, flag) => {
   if (mainWindow) {
@@ -164,6 +179,39 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
   }
 
+  // Intercept navigation to external URLs (e.g. Supabase OAuth / Google login)
+  // Opens external links in system browser and prevents electron from crashing into a blank white screen
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const isLocal = targetUrl.startsWith('http://127.0.0.1') || targetUrl.startsWith('http://localhost') || targetUrl.startsWith('file://');
+    if (!isLocal) {
+      event.preventDefault();
+      console.log('[ELECTRON] Intercepted external navigation, opening in default browser:', targetUrl);
+      const { shell } = require('electron');
+      shell.openExternal(targetUrl).catch(err => console.error('Failed to open external URL:', err));
+    }
+  });
+
+  // Intercept window.open calls to open in external browser
+  mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    console.log('[ELECTRON] Window open requested for external URL:', targetUrl);
+    const { shell } = require('electron');
+    shell.openExternal(targetUrl).catch(err => console.error('Failed to open external URL:', err));
+    return { action: 'deny' };
+  });
+
+  // Handle load failures gracefully: if an external or local load fails, restore the main app UI
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.warn(`[ELECTRON] Page failed to load: ${validatedURL} (Error: ${errorCode} - ${errorDescription})`);
+    if (!validatedURL.startsWith('http://127.0.0.1:5173') && !validatedURL.startsWith('http://localhost:5173')) {
+      console.log('[ELECTRON] Recovering from failed external load by returning to main app...');
+      if (isDev) {
+        mainWindow.loadURL('http://127.0.0.1:5173');
+      } else {
+        mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
+      }
+    }
+  });
+
   // Intercept the close event to hide to system tray instead of exiting
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
@@ -282,12 +330,24 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 
   // Terminate Python backend on shutdown
-  if (backendProcess) {
-    console.log('Terminating Python backend server process...');
-    try {
-      process.kill(-backendProcess.pid); // Kill process group if supported
-    } catch {
-      backendProcess.kill();
+  if (backendProcess && backendProcess.pid) {
+    console.log(`Terminating Python backend server process (PID: ${backendProcess.pid})...`);
+    if (process.platform === 'win32') {
+      try {
+        exec(`taskkill /F /T /PID ${backendProcess.pid}`, (err) => {
+          if (err) {
+            try { backendProcess.kill(); } catch {}
+          }
+        });
+      } catch {
+        try { backendProcess.kill(); } catch {}
+      }
+    } else {
+      try {
+        process.kill(-backendProcess.pid); // Kill process group on POSIX
+      } catch {
+        try { backendProcess.kill(); } catch {}
+      }
     }
   }
 });

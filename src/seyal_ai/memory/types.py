@@ -56,6 +56,7 @@ class MemoryRecord:
     access_count: int = 0
     privacy_level: PrivacyLevel = PrivacyLevel.PRIVATE
     metadata: dict[str, Any] = field(default_factory=dict)
+    embedding: list[float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert memory record to dictionary."""
@@ -82,6 +83,7 @@ class MemoryRecord:
             access_count=int(data.get("access_count", 0)),
             privacy_level=priv,
             metadata=data.get("metadata", {}),
+            embedding=data.get("embedding"),
         )
 
     def record_access(self) -> None:

@@ -1,31 +1,23 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ListTodo,
-  CheckCircle2,
-  Activity,
-  Clock,
-  AlertCircle,
-  XCircle,
   RefreshCw,
-  Search,
-  X,
-  ChevronDown,
-  ChevronRight,
   Loader2,
   StopCircle,
-  Copy,
-  Check,
   Download,
-  Terminal,
-  Globe,
-  Monitor,
-  Folder,
-  Wrench,
   Trash2,
-  ShieldAlert,
+  Activity,
 } from 'lucide-react';
 import { useSeyalAi } from '../../../context/SeyalAiContext';
 import { api } from '../../../services/api';
+import {
+  TaskMetricsHUD,
+  TaskFiltersToolbar,
+  TaskItemRow,
+} from './agent_task_manager';
+import type { AgentTask, AgentStep } from './agent_task_manager';
+
+export type { AgentTask, AgentStep };
 
 export const AgentTaskManagerTab: React.FC = () => {
   const { activities, addActivity } = useSeyalAi();
@@ -153,13 +145,14 @@ export const AgentTaskManagerTab: React.FC = () => {
     };
   }, [isAutoPolling]);
 
+  // Handle human-in-the-loop task approval
   const handlePermissionAction = async (taskId: string, action: 'grant' | 'deny') => {
     try {
       await api.updateTaskPermission(taskId, action);
-      showToast(`Permission ${action === 'grant' ? 'Granted' : 'Rejected'} for task ${taskId}`);
-      await loadAgentTasks(true);
+      showToast(`Permission ${action === 'grant' ? 'granted' : 'denied'} for task ${taskId}`);
+      await loadAgentTasks(false);
     } catch (err: any) {
-      showToast(`Permission action failed: ${err.message}`);
+      showToast(`Failed to update task permission: ${err?.response?.data?.detail || err.message}`);
     }
   };
 
@@ -223,43 +216,6 @@ export const AgentTaskManagerTab: React.FC = () => {
     showToast('Exported tasks log as JSON 💾');
   };
 
-  // Helper: Format duration
-  const formatDuration = (started?: any, completed?: any) => {
-    if (!started) return null;
-    const startSec = typeof started === 'number' ? (started > 1e11 ? started / 1000 : started) : new Date(started).getTime() / 1000;
-    const endSec = completed
-      ? typeof completed === 'number'
-        ? completed > 1e11
-          ? completed / 1000
-          : completed
-        : new Date(completed).getTime() / 1000
-      : Date.now() / 1000;
-
-    const diff = Math.max(0, endSec - startSec);
-    if (diff < 60) return `${diff.toFixed(1)}s`;
-    const mins = Math.floor(diff / 60);
-    const secs = Math.round(diff % 60);
-    return `${mins}m ${secs}s`;
-  };
-
-  // Helper: Tool icon mapper
-  const renderToolIcon = (toolName?: string) => {
-    const t = (toolName || '').toLowerCase();
-    if (t.includes('term') || t.includes('cmd') || t.includes('bash') || t.includes('shell')) {
-      return <Terminal className="w-3.5 h-3.5 text-cyan-400" />;
-    }
-    if (t.includes('web') || t.includes('browser') || t.includes('http') || t.includes('url')) {
-      return <Globe className="w-3.5 h-3.5 text-blue-400" />;
-    }
-    if (t.includes('screen') || t.includes('som') || t.includes('vision') || t.includes('window')) {
-      return <Monitor className="w-3.5 h-3.5 text-emerald-400" />;
-    }
-    if (t.includes('file') || t.includes('fs') || t.includes('dir')) {
-      return <Folder className="w-3.5 h-3.5 text-amber-400" />;
-    }
-    return <Wrench className="w-3.5 h-3.5 text-slate-400" />;
-  };
-
   // Filtered Tasks
   const filteredTasks = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -319,7 +275,7 @@ export const AgentTaskManagerTab: React.FC = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                Agent Task Manager
+                <span>Agent Task Manager</span>
                 <span className="px-2 py-0.5 text-[10px] uppercase font-mono tracking-wider font-semibold rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
                   Autonomous Ops
                 </span>
@@ -401,109 +357,16 @@ export const AgentTaskManagerTab: React.FC = () => {
         </div>
 
         {/* 6 Quick Metrics HUD Cards with 1-Click Filter */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-4 pt-3 border-t border-slate-800/80 text-xs">
-          {/* Total */}
-          <div
-            onClick={() => setTaskFilter('all')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'all'
-                ? 'bg-cyan-950/40 border-cyan-500/60 shadow-sm shadow-cyan-950/40'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Total Tasks</span>
-              <ListTodo className="w-3.5 h-3.5 text-cyan-400" />
-            </div>
-            <div className="text-base font-bold text-white font-mono mt-1">{totalCount}</div>
-          </div>
-
-          {/* Running */}
-          <div
-            onClick={() => setTaskFilter('in_progress')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'in_progress'
-                ? 'bg-blue-950/40 border-blue-500/60 shadow-sm shadow-blue-950/40'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>In Process</span>
-              <Activity className="w-3.5 h-3.5 text-blue-400" />
-            </div>
-            <div className="text-base font-bold text-blue-300 font-mono mt-1 flex items-center gap-1.5">
-              {runningCount}
-              {runningCount > 0 && <span className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />}
-            </div>
-          </div>
-
-          {/* Waiting Approval */}
-          <div
-            onClick={() => setTaskFilter('waiting_permission')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'waiting_permission'
-                ? 'bg-amber-950/40 border-amber-500/60 shadow-sm shadow-amber-950/40'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Waiting Approval</span>
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-            </div>
-            <div className="text-base font-bold text-amber-300 font-mono mt-1 flex items-center gap-1.5">
-              {permissionCount}
-              {permissionCount > 0 && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />}
-            </div>
-          </div>
-
-          {/* Completed */}
-          <div
-            onClick={() => setTaskFilter('completed')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'completed'
-                ? 'bg-emerald-950/40 border-emerald-500/60 shadow-sm shadow-emerald-950/40'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Completed</span>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            </div>
-            <div className="text-base font-bold text-emerald-300 font-mono mt-1">{completedCount}</div>
-          </div>
-
-          {/* Cancelled */}
-          <div
-            onClick={() => setTaskFilter('cancelled')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'cancelled'
-                ? 'bg-slate-800 border-slate-600 shadow-sm'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Cancelled</span>
-              <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
-            </div>
-            <div className="text-base font-bold text-slate-300 font-mono mt-1">{cancelledCount}</div>
-          </div>
-
-          {/* Failed */}
-          <div
-            onClick={() => setTaskFilter('failed')}
-            className={`p-3 rounded-xl border transition-all cursor-pointer ${
-              taskFilter === 'failed'
-                ? 'bg-rose-950/40 border-rose-500/60 shadow-sm shadow-rose-950/40'
-                : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            <div className="text-[11px] text-slate-400 flex items-center justify-between">
-              <span>Failed</span>
-              <XCircle className="w-3.5 h-3.5 text-rose-400" />
-            </div>
-            <div className="text-base font-bold text-rose-300 font-mono mt-1">{failedCount}</div>
-          </div>
-        </div>
+        <TaskMetricsHUD
+          totalCount={totalCount}
+          runningCount={runningCount}
+          permissionCount={permissionCount}
+          completedCount={completedCount}
+          cancelledCount={cancelledCount}
+          failedCount={failedCount}
+          taskFilter={taskFilter}
+          setTaskFilter={setTaskFilter}
+        />
       </div>
 
       {/* Toast Notification Banner */}
@@ -517,52 +380,12 @@ export const AgentTaskManagerTab: React.FC = () => {
       {/* Main Body */}
       <div className="p-6 sm:p-8 space-y-4 w-full max-w-6xl mx-auto">
         {/* Search & Status Filters Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-800/80">
-          {/* Instant Search Bar */}
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              type="text"
-              placeholder="Search by task goal, plan ID, or tool..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg bg-slate-900/90 border border-slate-700/60 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/40"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Task Type Filters */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            {[
-              { id: 'all', label: 'All Types' },
-              { id: 'immediate', label: '⚡ Immediate' },
-              { id: 'scheduled', label: '⏰ Scheduled' },
-              { id: 'continuous', label: '🔄 Continuous' },
-              { id: 'conditional', label: '🔀 Conditional' },
-            ].map((tf) => (
-              <button
-                key={tf.id}
-                type="button"
-                onClick={() => setTypeFilter(tf.id as any)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                  typeFilter === tf.id
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm font-semibold'
-                    : 'bg-slate-900/60 text-slate-400 border border-slate-800 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                {tf.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <TaskFiltersToolbar
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          typeFilter={typeFilter}
+          setTypeFilter={setTypeFilter}
+        />
 
         {/* Task Cards List */}
         <div className="space-y-3 pt-1">
@@ -593,7 +416,7 @@ export const AgentTaskManagerTab: React.FC = () => {
                       setTaskFilter('all');
                       setTypeFilter('all');
                     }}
-                    className="text-xs text-cyan-400 hover:text-cyan-300 underline font-medium mt-1"
+                    className="text-xs text-cyan-400 hover:text-cyan-300 underline font-medium mt-1 cursor-pointer"
                   >
                     Reset all filters
                   </button>
@@ -601,293 +424,23 @@ export const AgentTaskManagerTab: React.FC = () => {
               </div>
             </div>
           ) : (
-            filteredTasks.map((task: any) => {
-              const isExpanded = expandedTaskId === task.plan_id;
-              const isRunning = task.status === 'in_progress' || task.status === 'running';
-              const isCompleted = task.status === 'completed';
-              const isPending = task.status === 'pending' || task.status === 'planning' || task.status === 'paused';
-              const isWaitingPermission = task.status === 'waiting_permission';
-              const isFailed = task.status === 'failed';
-              const isCancelled = task.status === 'cancelled';
-              const totalSteps = task.total_steps || task.steps?.length || 1;
-              const completedSteps = task.completed_steps || (isCompleted ? totalSteps : 0);
-              const percent = Math.min(100, Math.round((completedSteps / Math.max(1, totalSteps)) * 100));
-              const durationStr = formatDuration(task.started_at || task.created_at, task.completed_at);
-
-              return (
-                <div
-                  key={task.plan_id}
-                  className="rounded-xl bg-slate-900/70 border border-slate-800/80 hover:border-cyan-500/30 transition-all overflow-hidden shadow-sm"
-                >
-                  {/* Card Header Row */}
-                  <div className="p-4 sm:p-4.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      {/* Status Icon */}
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                          isRunning
-                            ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-400'
-                            : isCompleted
-                            ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
-                            : isWaitingPermission
-                            ? 'bg-amber-500/20 border border-amber-500/50 text-amber-300 animate-pulse'
-                            : isPending
-                            ? 'bg-amber-500/15 border border-amber-500/40 text-amber-400'
-                            : isFailed
-                            ? 'bg-rose-500/15 border border-rose-500/40 text-rose-400'
-                            : isCancelled
-                            ? 'bg-slate-800 border border-slate-700 text-slate-400'
-                            : 'bg-slate-800 border border-slate-700 text-slate-400'
-                        }`}
-                      >
-                        {isRunning ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : isCompleted ? (
-                          <CheckCircle2 className="w-4 h-4" />
-                        ) : isWaitingPermission ? (
-                          <ShieldAlert className="w-4 h-4" />
-                        ) : isPending ? (
-                          <Clock className="w-4 h-4" />
-                        ) : isFailed ? (
-                          <XCircle className="w-4 h-4" />
-                        ) : (
-                          <AlertCircle className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-xs font-semibold text-slate-100 font-mono">
-                            {task.goal?.description || task.title || 'Autonomous Agent Task'}
-                          </span>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-slate-950 text-slate-400 border border-slate-800">
-                            {task.plan_id}
-                          </span>
-                          {/* Type Badge */}
-                          <span
-                            className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                              (task.task_type || task.spec?.task_type) === 'scheduled'
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                : (task.task_type || task.spec?.task_type) === 'continuous'
-                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                                : (task.task_type || task.spec?.task_type) === 'conditional'
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                                : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                            }`}
-                          >
-                            {task.task_type || task.spec?.task_type || 'Immediate'}
-                          </span>
-                        </div>
-
-                        {/* Metadata row: steps, created time, latency */}
-                        <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-2.5">
-                          <span>
-                            {completedSteps} / {totalSteps} steps completed
-                          </span>
-                          <span>•</span>
-                          <span>
-                            {task.created_at
-                              ? new Date(
-                                  typeof task.created_at === 'number' && task.created_at < 1e12
-                                    ? task.created_at * 1000
-                                    : task.created_at
-                                ).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                })
-                              : 'Recently'}
-                          </span>
-                          {durationStr && (
-                            <>
-                              <span>•</span>
-                              <span className="text-cyan-400 font-mono flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {durationStr}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Actions on Card Header */}
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      {/* Status Tag */}
-                      <span
-                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
-                          isRunning
-                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse'
-                            : isCompleted
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                            : isWaitingPermission
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
-                            : isPending
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : isFailed
-                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                            : 'bg-slate-800 text-slate-400 border border-slate-700'
-                        }`}
-                      >
-                        {isWaitingPermission
-                          ? 'Needs Permission'
-                          : task.status === 'in_progress'
-                          ? 'Running'
-                          : task.status.replace('_', ' ')}
-                      </span>
-
-                      {/* Grant / Deny Buttons */}
-                      {isWaitingPermission && (
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handlePermissionAction(task.plan_id || task.id, 'grant')}
-                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition-all cursor-pointer shadow-sm"
-                            title="Allow agent to proceed"
-                          >
-                            Grant
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handlePermissionAction(task.plan_id || task.id, 'deny')}
-                            className="px-2.5 py-1 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200 text-[11px] font-medium transition-all cursor-pointer"
-                            title="Reject task"
-                          >
-                            Deny
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Cancel Running Task */}
-                      {isRunning && (
-                        <button
-                          type="button"
-                          onClick={() => handleCancelTask(task.plan_id)}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-[11px] font-medium transition-all cursor-pointer"
-                          title="Cancel running task"
-                        >
-                          Cancel
-                        </button>
-                      )}
-
-                      {/* Copy Trace JSON */}
-                      <button
-                        type="button"
-                        onClick={() => handleCopyTaskTrace(task)}
-                        className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-cyan-300 border border-slate-700/60 transition-all cursor-pointer"
-                        title="Copy Task JSON Trace"
-                      >
-                        {copiedTaskId === task.plan_id ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-
-                      {/* Expand / Collapse Steps */}
-                      {task.steps && task.steps.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setExpandedTaskId(isExpanded ? null : task.plan_id)}
-                          className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition-all border border-slate-700/60 cursor-pointer"
-                          title={isExpanded ? 'Hide steps' : 'View steps'}
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
-                          ) : (
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="px-4 sm:px-5 pb-3">
-                    <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800/60">
-                      <div
-                        className={`h-full transition-all duration-500 ${
-                          isCompleted
-                            ? 'bg-emerald-500'
-                            : isFailed
-                            ? 'bg-rose-500'
-                            : 'bg-gradient-to-r from-cyan-500 to-blue-500'
-                        }`}
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Expanded Step-by-Step Breakdown */}
-                  {isExpanded && task.steps && task.steps.length > 0 && (
-                    <div className="px-4 sm:px-5 pb-4 pt-2 border-t border-slate-800/80 bg-slate-950/40 space-y-2">
-                      <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                        <span>Execution Step Details ({task.steps.length})</span>
-                        <span className="text-[10px] font-mono text-cyan-400">
-                          {percent}% Complete
-                        </span>
-                      </div>
-                      {task.steps.map((step: any, sIdx: number) => {
-                        const stepDuration = formatDuration(step.started_at, step.completed_at);
-                        return (
-                          <div
-                            key={step.step_id || sIdx}
-                            className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/70 flex items-start justify-between gap-3 text-xs"
-                          >
-                            <div className="flex items-start gap-2.5 min-w-0">
-                              <span className="w-5 h-5 rounded-md bg-slate-800 border border-slate-700 text-slate-300 font-mono text-[10px] flex items-center justify-center shrink-0 mt-0.5">
-                                {sIdx + 1}
-                              </span>
-                              <div className="min-w-0 space-y-0.5">
-                                <div className="font-medium text-slate-200 truncate">
-                                  {step.description || 'Action step'}
-                                </div>
-                                <div className="flex items-center gap-2 pt-0.5">
-                                  {step.tool_name && (
-                                    <span className="text-[10px] font-mono text-cyan-400/90 flex items-center gap-1 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-500/20">
-                                      {renderToolIcon(step.tool_name)}
-                                      {step.tool_name}
-                                    </span>
-                                  )}
-                                  {stepDuration && (
-                                    <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                                      <Clock className="w-3 h-3 text-slate-500" />
-                                      {stepDuration}
-                                    </span>
-                                  )}
-                                </div>
-                                {step.error && (
-                                  <div className="text-[10px] font-mono text-rose-400 bg-rose-950/40 p-1.5 rounded border border-rose-500/30 mt-1">
-                                    Error: {step.error}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <span
-                              className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shrink-0 ${
-                                step.status === 'completed'
-                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                  : step.status === 'running'
-                                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 animate-pulse'
-                                  : step.status === 'failed'
-                                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              {step.status}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+            filteredTasks.map((task: any) => (
+              <TaskItemRow
+                key={task.plan_id}
+                task={task}
+                isExpanded={expandedTaskId === task.plan_id}
+                onToggleExpand={(id) => setExpandedTaskId(expandedTaskId === id ? null : id)}
+                copiedTaskId={copiedTaskId}
+                onCopyTaskTrace={handleCopyTaskTrace}
+                onCancelTask={handleCancelTask}
+                onPermissionAction={handlePermissionAction}
+              />
+            ))
           )}
         </div>
       </div>
     </div>
   );
 };
+
+export default AgentTaskManagerTab;

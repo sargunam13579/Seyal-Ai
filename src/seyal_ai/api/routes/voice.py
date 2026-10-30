@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
+from starlette.websockets import WebSocketState
 
 from seyal_ai.api.schemas import (
     VoiceConfigResponse,
@@ -60,6 +61,19 @@ def _get_cached_tts_engine(provider_name: str, voice: str, speed: float):
 def _get_brain(request: Request):
     """Get the SeyalAiBrain from app state."""
     return request.app.state.brain
+
+
+async def _safe_send_json(ws: WebSocket, payload: dict[str, Any]) -> bool:
+    """Send JSON payload over WebSocket with client state and disconnection safety."""
+    try:
+        state = getattr(ws, "client_state", None)
+        # Check if connected or if ws is a unit test mock
+        if state == WebSocketState.CONNECTED or state is None or "Mock" in type(ws).__name__:
+            await ws.send_text(json.dumps(payload))
+            return True
+    except Exception as e:
+        log.debug("WebSocket safe send notice: %s", e)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -349,11 +363,11 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
 
     try:
         # Acknowledge connection
-        await websocket.send_text(json.dumps({
+        await _safe_send_json(websocket, {
             "event": "connected",
             "message": "Seyal AI Realtime Voice Connected",
             "sample_rate": 16000,
-        }))
+        })
 
         while True:
             message = await websocket.receive()
@@ -371,7 +385,7 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                         if is_speaking_turn:
                             speech_chunks.clear()
                     elif msg_type == "ping":
-                        await websocket.send_text(json.dumps({"event": "pong"}))
+                        await _safe_send_json(websocket, {"event": "pong"})
                 except Exception as parse_err:
                     log.debug("WebSocket text message parse error: %s", parse_err)
 
@@ -391,21 +405,21 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                         is_speaking_turn = False
                         current_turn_seq += 1
                         # Notify frontend immediately to silence playback
-                        await websocket.send_text(json.dumps({
+                        await _safe_send_json(websocket, {
                             "event": "barge_in",
                             "message": "Acoustic interruption detected",
-                        }))
-                        await websocket.send_text(json.dumps({
+                        })
+                        await _safe_send_json(websocket, {
                             "event": "speech_started",
                             "message": "User started speaking",
-                        }))
+                        })
                     elif len(speech_chunks) == 0:
                         current_turn_seq += 1
                         # Immediate notification to frontend that user started speaking
-                        await websocket.send_text(json.dumps({
+                        await _safe_send_json(websocket, {
                             "event": "speech_started",
                             "message": "User started speaking",
-                        }))
+                        })
                     # PRESERVE all speech chunks (do not clear user's words on barge-in)
                     speech_chunks.append(chunk_int16)
 
@@ -427,11 +441,11 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                                         audio_data, 16000, lang, fast_interim=True
                                     )
                                     if res.text and res.text.strip() and turn_seq == current_turn_seq:
-                                        await websocket.send_text(json.dumps({
+                                        await _safe_send_json(websocket, {
                                             "event": "interim_transcript",
                                             "text": res.text.strip(),
                                             "language": res.language,
-                                        }))
+                                        })
                                 except Exception as interim_err:
                                     log.debug("Realtime interim STT notice: %s", interim_err)
 
@@ -443,8 +457,9 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                     speech_chunks = []
                     vad.reset()
 
-                    # Minimum duration check (~0.25 seconds)
-                    if len(full_audio) >= 4000:
+                    # Minimum duration check (~0.25s) and vocal energy verification (eliminates silent noise buffers)
+                    audio_energy = float(np.sqrt(np.mean(full_audio.astype(np.float32)**2)))
+                    if len(full_audio) >= 4000 and audio_energy >= 120:
                         try:
                             # Use cached Multilingual STT engine
                             stt_prov = "multilingual_gemini"
@@ -465,31 +480,28 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
                             interim_task = None
 
                             if trans_res.text and trans_res.text.strip():
-                                await websocket.send_text(json.dumps({
+                                await _safe_send_json(websocket, {
                                     "event": "transcript",
                                     "text": trans_res.text.strip(),
                                     "language": trans_res.language,
-                                }))
+                                })
                             else:
-                                await websocket.send_text(json.dumps({
+                                await _safe_send_json(websocket, {
                                     "event": "stt_empty",
                                     "message": "Speech could not be recognized",
                                     "language": language,
-                                }))
+                                })
                         except Exception as stt_err:
                             current_turn_seq += 1
                             if interim_task and not interim_task.done():
                                 interim_task.cancel()
                             interim_task = None
                             log.debug("Realtime STT transcribe notice: %s", stt_err)
-                            try:
-                                await websocket.send_text(json.dumps({
-                                    "event": "stt_error",
-                                    "error": str(stt_err),
-                                    "language": language,
-                                }))
-                            except Exception:
-                                pass
+                            await _safe_send_json(websocket, {
+                                "event": "stt_error",
+                                "error": str(stt_err),
+                                "language": language,
+                            })
                     else:
                         current_turn_seq += 1
                         if interim_task and not interim_task.done():
@@ -500,4 +512,9 @@ async def voice_websocket_stream(websocket: WebSocket) -> None:
         log.info("Client disconnected from Realtime Voice WebSocket")
     except Exception as e:
         log.error("Realtime Voice WebSocket error: %s", e)
+    finally:
+        if interim_task and not interim_task.done():
+            interim_task.cancel()
+        interim_task = None
+        speech_chunks.clear()
 

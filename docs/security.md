@@ -16,11 +16,15 @@ Seyal AI operates as an autonomous agent with local system access, device contro
 ├─────────────────────────────────────────────────────────────┤
 │ 3. Dangerous Command Blocker & Sandbox Classifier          │
 ├─────────────────────────────────────────────────────────────┤
-│ 4. Two-Phase Confirmation Guard for High-Risk Actions        │
+│ 4. Enterprise Safety Guardrails (App Shields & Path Blocks) │
 ├─────────────────────────────────────────────────────────────┤
-│ 5. AES-GCM Encrypted Secret Vault (Keys & Credentials)      │
+│ 5. Two-Phase Confirmation Guard for High-Risk Actions        │
 ├─────────────────────────────────────────────────────────────┤
-│ 6. Global Kill Switch & Emergency Stop                      │
+│ 6. PII & API Key Masking in Logs and Telemetry              │
+├─────────────────────────────────────────────────────────────┤
+│ 7. AES-GCM Encrypted Secret Vault (Keys & Credentials)      │
+├─────────────────────────────────────────────────────────────┤
+│ 8. Global Kill Switch & Emergency Stop                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,7 +66,32 @@ All shell and PowerShell commands pass through the `TerminalSecurityClassifier` 
 
 ---
 
-## 4. Cryptographic Secret Vault
+## 4. Enterprise Safety Guardrails & Policy Enforcement (`seyal_ai.security.guardrails`)
+
+Seyal AI includes a centralized policy enforcer that runs pre-flight boundary checks before any visual, synthetic input, or automation action is executed:
+
+### Safety Profiles
+Users can choose between three operational safety tiers:
+1. **Zero-Trust**: Requires strict explicit confirmation for virtually all modifying actions, strictly blocks all sensitive applications, and restricts execution strictly to safe workspace directories.
+2. **Balanced (Default)**: Protects credentials, prevents self-termination, blocks checkout/payment gateways, and prompts for file deletions and modifying shell commands.
+3. **Developer**: Permits flexible terminal automation while still strictly enforcing anti-kill and credential vault protection.
+
+### Sensitive Application Shielding
+To prevent autonomous agents from accidentally or maliciously reading credentials or making unauthorized transactions, the guardrail actively inspects window titles and target processes:
+- **Credential & Password Managers**: Automatically blocks access to `Bitwarden`, `1Password`, `KeePass`, `LastPass`, and Windows Credential Manager.
+- **Payment & Checkout Windows**: Blocks automated interactions with checkout gateways, banking portals, and credit card input screens.
+
+### System Boundary & Anti-Self-Kill
+- **Blacklisted Directories**: Rejects any file manipulation targeting critical system directories (e.g., `C:\Windows`, `C:\Windows\System32`, `/etc`, `/usr/bin`).
+- **Self-Preservation**: Rejects any attempt to terminate, kill, or close Seyal AI background daemons, Electron processes, or Python runtime engines.
+
+### PII & Secret Redaction
+- Automatic masking of API keys (`sk-...`, `AIza...`), credit card numbers, and password tokens in system logs, terminal telemetry, and event feeds.
+- Persisted configuration saved in `~/.seyal_ai/safety.json`.
+
+---
+
+## 5. Cryptographic Secret Vault
 
 Sensitive credentials (Gemini, OpenAI, Anthropic, Deepgram, and ElevenLabs API keys) are stored in an encrypted vault (`~/.seyal_ai/vault.enc`):
 - **Cipher**: AES-256-GCM authenticated encryption.
@@ -71,7 +100,7 @@ Sensitive credentials (Gemini, OpenAI, Anthropic, Deepgram, and ElevenLabs API k
 
 ---
 
-## 5. Device Pairing & Handshake
+## 6. Device Pairing & Handshake
 
 To prevent unauthorized devices on the local network from sending commands to Seyal AI:
 1. Devices must initiate a pairing handshake.
@@ -82,6 +111,16 @@ To prevent unauthorized devices on the local network from sending commands to Se
 
 ---
 
-## 6. Audit Logging
+## 7. Universal Kill Switch & Emergency Stop
+
+- **Voice Trigger**: Saying **`"Seyal AI STOP"`** or **`"EMERGENCY STOP"`** immediately invokes hard cancellation.
+- **Execution Effect**:
+  - Broadcasts cancellation signals across all active async worker tasks.
+  - Aborts currently executing plans and stops synthetic keyboard/mouse automation immediately.
+  - Terminates any spawned subprocesses and emits an audible warble earcon alert.
+
+---
+
+## 8. Audit Logging
 
 Every tool execution, permission check, security block, authentication event, and device pairing is recorded in the append-only audit trail (`src/seyal_ai/security/audit.py` and SQLite `audit_log` table) for forensic review and full transparency.

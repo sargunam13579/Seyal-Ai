@@ -1,7 +1,7 @@
 # Seyal AI — Voice-First, Cross-Device Autonomous Personal AI Agent
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
-[![Tests Passing](https://img.shields.io/badge/tests-276%20passed-brightgreen.svg)]()
+[![Tests Passing](https://img.shields.io/badge/tests-570%20passed-brightgreen.svg)]()
 [![Code Style](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checking](https://img.shields.io/badge/type%20checker-pyright%20%7C%20mypy-blue.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -13,11 +13,17 @@
 ## 🌟 Key Capabilities
 
 - 🤖 **Autonomous Multi-Step Planning**: Understands high-level compound goals, decomposes them into dependency-ordered graphs, handles retries, variable passing (`{{step_1.output}}`), and automated result verification.
-- 🎙️ **Voice-First & Hands-Free**: Low-latency voice loop with wake word detection (*"Seyal AI"*), dynamic renaming (*"Call yourself Aria"*), and non-visual audio feedback (earcons).
-- 💻 **Complete Laptop Control**: 64 OS automation tools for window management, document conversion, audio control, application launching, and screen understanding.
-- 🖥️ **Conversational Computer-Use**: Autonomous visual agent utilizing Set-of-Marks grounding and real-time screen awareness for Windows apps.
+- 🎙️ **Voice-First & Hands-Free**: Low-latency voice loop with wake word detection (*"Seyal AI"*), dynamic renaming (*"Call yourself Aria"*), acoustic barge-in interruption, and non-visual audio feedback (earcons).
+- 🔌 **Model Context Protocol (MCP)**: Native stdio/json-rpc MCP client & server manager to connect external tools (GitHub, Brave, SQLite, filesystem) dynamically into Seyal AI's ToolRegistry.
+- 🛡️ **Enterprise Safety Guardrails**: Sensitive application shielding (Bitwarden, 1Password, KeePass, banking portals), system path blacklists (System32), payment gateway blocking, anti-kill protection, and automatic API key/credit card masking.
+- ⚙️ **Scheduled Automations & Background Routines**: Persistent cron and interval-based desktop routines with execution telemetry and background orchestration.
+- 🎨 **Deep Personalization & Communication Tones**: Configurable communication tones (*Action-First*, *Executive Advisor*, *Pair-Programmer Copilot*, *Technical Mentor*), custom instructions, and language auto-switching.
+- 💻 **Complete Laptop & OS Automation**: 64 OS automation tools for window management, document conversion, audio control, application launching, and screen understanding.
+- 🖥️ **Conversational Computer-Use**: Autonomous visual agent utilizing Set-of-Marks grounding, Per-Monitor v2 DPI-aware screen capture, Semantic UIA clicking, and multilingual voice shortcuts (English, Tamil, Tanglish).
 - 🌐 **Browser Automation**: Full Playwright automation for navigating web pages, filling forms, and extracting live web content.
-- 🧠 **Unified 6-Tier Memory**: Working, Short-Term, Long-Term, Episodic, Semantic (ChromaDB vector store), and Procedural memory with automated preference learning.
+- 🧠 **Unified 6-Tier Memory & Dual-Mode Vector Store**: Working, Short-Term, Long-Term, Episodic, Semantic (Google Gemini `text-embedding-004` & local deterministic 256-dim n-gram vectorizer), and Procedural memory with pre-orchestration recall.
+- 🧹 **Storage Maintenance & Nuclear Data Controls**: Live storage footprint analytics (vision frames, vectors, audio, logs), one-click cleanup, SQLite VACUUM optimization, and granular history purges.
+- 🔔 **Multi-Channel Notifications**: Outbound webhook dispatchers for Discord, Slack, Telegram, and custom HTTP endpoints with delivery telemetry.
 - 🔒 **Defense-in-Depth Security**: Granular permission scopes (view/revoke), AES-GCM encrypted secret vault, PIN-based device pairing, and dangerous command blockers.
 - ⚡ **Offline Mode Fallback**: Deterministic local command execution (app launching, volume control, status queries, emergency stop) when internet or cloud LLMs are unavailable.
 - 🚨 **Universal Kill Switch**: Emergency stop command (*"Seyal AI STOP"*) instantly halts all background tasks, sub-agents, and hardware actions.
@@ -56,6 +62,9 @@ seyal_ai voice
 
 # Background REST & WebSocket Server (Swagger at http://localhost:8000/docs)
 seyal_ai serve --port 8000
+
+# Full Desktop Application (Electron + React UI)
+npm run dev
 ```
 
 ---
@@ -63,10 +72,10 @@ seyal_ai serve --port 8000
 ## 📚 Complete Documentation Suite
 
 - 📖 [**Installation Guide**](docs/installation.md) — Comprehensive setup instructions for Windows, Linux, and macOS.
-- 📖 [**User Guide**](docs/user_guide.md) — Daily usage, voice commands, multi-step examples, and macros.
-- 📖 [**Developer Guide**](docs/developer_guide.md) — Architecture, creating custom tools, and event-bus development.
+- 📖 [**User Guide**](docs/user_guide.md) — Daily usage, voice commands, multi-step examples, personalization, and routines.
+- 📖 [**Developer Guide**](docs/developer_guide.md) — Architecture, creating custom tools, MCP integrations, and event-bus development.
 - 📖 [**API Reference**](docs/api_reference.md) — Complete REST and WebSocket endpoint specifications.
-- 📖 [**Security Documentation**](docs/security.md) — Threat model, permission scopes, encryption, and audit logs.
+- 📖 [**Security Documentation**](docs/security.md) — Threat model, safety guardrails, permission scopes, encryption, and audit logs.
 - 📖 [**Architecture Documentation**](docs/architecture.md) — Deep dive into core subsystems, data flows, and concurrency.
 - 📖 [**Troubleshooting Guide**](docs/troubleshooting.md) — Diagnostic checklists, error solutions, and recovery steps.
 
@@ -81,7 +90,10 @@ User Voice / Text / API
 ┌─────────────────────────────────────────────────────────────┐
 │                       SeyalAiBrain                            │
 │  ┌─────────────────┐ ┌──────────────────┐ ┌───────────────┐ │
-│  │ Identity / Wake │ │ Permissions Guard│ │ Offline Engine│ │
+│  │ Identity / Wake │ │ Safety Guardrails│ │Personalization│ │
+│  └─────────────────┘ └──────────────────┘ └───────────────┘ │
+│  ┌─────────────────┐ ┌──────────────────┐ ┌───────────────┐ │
+│  │ Semantic Recall │ │ Permissions Guard│ │ Offline Engine│ │
 │  └─────────────────┘ └──────────────────┘ └───────────────┘ │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -102,6 +114,9 @@ User Voice / Text / API
         │ ┌──────────────┐ ┌─────────────┐ ┌──────┐ │
         │ │ Laptop Agent │ │Android Agent│ │Vision│ │
         │ └──────────────┘ └─────────────┘ └──────┘ │
+        │ ┌──────────────┐ ┌─────────────┐ ┌──────┐ │
+        │ │Computer Use  │ │ MCP Manager │ │Routines│
+        │ └──────────────┘ └─────────────┘ └──────┘ │
         └───────────────────────────────────────────┘
 ```
 
@@ -109,11 +124,11 @@ User Voice / Text / API
 
 ## 🧪 Testing & Verification
 
-Seyal AI includes 12 comprehensive test suites covering all 17 feature areas:
+Seyal AI includes 12 comprehensive test suites covering all feature areas (570 tests passing):
 
 ```powershell
-# Run the entire test suite (276+ tests)
-pytest
+# Run the entire test suite (570 tests)
+.\.venv\Scripts\python.exe -m pytest
 
 # Static analysis and linting
 ruff check .

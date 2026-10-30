@@ -80,7 +80,7 @@ class UserKnowledgeService:
     def set_user_knowledge_item(self, key: str, value: str) -> Dict[str, str]:
         data = self._load()
         cleaned_key = key.strip()
-        data["user_knowledge"][cleaned_key] = str(value).strip()
+        data["user_knowledge"][cleaned_key] = value.strip()
         self._save(data)
         return data["user_knowledge"]
 
@@ -179,10 +179,18 @@ class UserKnowledgeService:
         return False
 
     # -------------------------------------------------------------
-    # Full Hub Payload
+    # Full Hub Payload & Reset
     # -------------------------------------------------------------
     def get_full_hub(self) -> Dict[str, Any]:
         return self._load()
+
+    def save_hub(self, data: Dict[str, Any]) -> bool:
+        """Save full hub payload."""
+        return self._save(data)
+
+    def wipe_all(self) -> bool:
+        """Reset the user knowledge hub, clearing all facts, reminders, and standing rules."""
+        return self._save(_get_default_hub())
 
 
 # Singleton

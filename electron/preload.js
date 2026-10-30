@@ -3,7 +3,11 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose safe, selected Electron APIs to the React application renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   sendEmergencyKill: () => ipcRenderer.send('emergency-kill'),
-  onBackendStatus: (callback) => ipcRenderer.on('backend-status', (_event, value) => callback(value)),
+  onBackendStatus: (callback) => {
+    const handler = (_event, value) => callback(value);
+    ipcRenderer.on('backend-status', handler);
+    return () => ipcRenderer.removeListener('backend-status', handler);
+  },
   openApp: (appName) => ipcRenderer.invoke('open-app', appName),
   onVoiceListenTrigger: (callback) => {
     const handler = () => callback();
@@ -14,5 +18,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openLogsFolder: () => ipcRenderer.invoke('open-logs-folder'),
   setAutoLaunch: (flag) => ipcRenderer.invoke('set-auto-launch', flag),
   getAutoLaunch: () => ipcRenderer.invoke('get-auto-launch'),
-  getAppVersion: () => ipcRenderer.invoke('get-app-version')
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url)
 });
