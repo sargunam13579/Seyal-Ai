@@ -179,6 +179,64 @@ def test_pairing_invalid_pin_inputs_safely_rejected(tmp_path: Path):
     assert session_id not in mgr._pending_sessions
 
 
+def test_pairing_non_ascii_and_unicode_digits_safely_rejected(tmp_path: Path):
+    """Non-ASCII characters and Unicode digits are rejected safely without exception and increment failed_attempts."""
+    storage = tmp_path / "paired.json"
+    mgr = DevicePairingManager(storage_path=storage)
+
+    session = mgr.initiate_pairing(device_name="Unicode Device", device_type="phone")
+    session_id = session.session_id
+
+    # 1. Tamil characters - must not raise TypeError
+    res1 = mgr.verify_pairing(session_id, "தமிழ்123")
+    assert res1 is None
+    assert session.failed_attempts == 1
+
+    # 2. Full-width Unicode digits - must not be normalized into ASCII digits
+    res2 = mgr.verify_pairing(session_id, "１２３４５６")
+    assert res2 is None
+    assert session.failed_attempts == 2
+
+    # 3. Arabic-Indic digits - must be rejected
+    res3 = mgr.verify_pairing(session_id, "١٢٣٤٥٦")
+    assert res3 is None
+    assert session.failed_attempts == 3
+
+    # 4. Emoji PIN input - must be rejected
+    res4 = mgr.verify_pairing(session_id, "🔑12345")
+    assert res4 is None
+    assert session.failed_attempts == 4
+    assert session_id in mgr._pending_sessions
+
+    # 5. 5th non-ASCII attempt immediately invalidates the session
+    res5 = mgr.verify_pairing(session_id, "செயல்")
+    assert res5 is None
+    assert session_id not in mgr._pending_sessions, "5th invalid non-ASCII attempt must delete the session"
+
+
+def test_pairing_valid_pin_succeeds_after_four_non_ascii_failures(tmp_path: Path):
+    """Valid PIN succeeds on the 5th attempt after four consecutive non-ASCII/Unicode failures."""
+    storage = tmp_path / "paired.json"
+    mgr = DevicePairingManager(storage_path=storage)
+
+    session = mgr.initiate_pairing(device_name="Resilient Device", device_type="phone")
+    session_id = session.session_id
+    correct_pin = session.pin
+
+    # 4 non-ASCII attempts
+    non_ascii_samples = ["வணக்கம்", "１２３４５６", "१२३४५६", "🔐12345"]
+    for i, bad_input in enumerate(non_ascii_samples, start=1):
+        assert mgr.verify_pairing(session_id, bad_input) is None
+        assert session_id in mgr._pending_sessions
+        assert session.failed_attempts == i
+
+    # 5th attempt with genuine correct PIN succeeds
+    device = mgr.verify_pairing(session_id, correct_pin)
+    assert device is not None
+    assert device.device_name == "Resilient Device"
+    assert session_id not in mgr._pending_sessions
+
+
 def test_pairing_logs_never_expose_plaintext_pin(tmp_path: Path, caplog: pytest.LogCaptureFixture):
     """Application logs must never record the plaintext PIN during initiation, failures, or successes."""
     storage = tmp_path / "paired.json"

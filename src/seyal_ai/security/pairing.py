@@ -174,61 +174,50 @@ class DevicePairingManager:
             del self._pending_sessions[session_id]
             return None
 
-        # Validate PIN type and format
-        if not isinstance(pin, str):
+        def _register_failure(reason: str) -> None:
             session.failed_attempts += 1
             if session.failed_attempts >= session.max_attempts:
                 del self._pending_sessions[session_id]
                 log.warning(
-                    "Invalid PIN type for session %s; reached %d failed attempts, session invalidated",
+                    "%s for session %s; reached %d failed attempts, session invalidated",
+                    reason,
                     session_id,
                     session.failed_attempts,
                 )
             else:
                 log.warning(
-                    "Invalid PIN type for session %s (attempt %d/%d)",
+                    "%s for session %s (attempt %d/%d)",
+                    reason,
                     session_id,
                     session.failed_attempts,
                     session.max_attempts,
                 )
+
+        # Validate PIN type and format
+        if not isinstance(pin, str):
+            _register_failure("Invalid PIN type")
             return None
 
         cleaned_pin = pin.strip()
         if not cleaned_pin:
-            session.failed_attempts += 1
-            if session.failed_attempts >= session.max_attempts:
-                del self._pending_sessions[session_id]
-                log.warning(
-                    "Empty PIN provided for session %s; reached %d failed attempts, session invalidated",
-                    session_id,
-                    session.failed_attempts,
-                )
-            else:
-                log.warning(
-                    "Empty PIN provided for session %s (attempt %d/%d)",
-                    session_id,
-                    session.failed_attempts,
-                    session.max_attempts,
-                )
+            _register_failure("Empty PIN provided")
+            return None
+
+        # Validate ASCII-only encoding (reject non-ASCII/Unicode without normalization or exceptions)
+        if not cleaned_pin.isascii():
+            _register_failure("Non-ASCII PIN provided")
             return None
 
         # Constant-time comparison using hmac.compare_digest
-        if not hmac.compare_digest(session.pin, cleaned_pin):
-            session.failed_attempts += 1
-            if session.failed_attempts >= session.max_attempts:
-                del self._pending_sessions[session_id]
-                log.warning(
-                    "Incorrect PIN for session %s; reached %d failed attempts, session invalidated",
-                    session_id,
-                    session.failed_attempts,
-                )
-            else:
-                log.warning(
-                    "Incorrect PIN for session %s (attempt %d/%d)",
-                    session_id,
-                    session.failed_attempts,
-                    session.max_attempts,
-                )
+        try:
+            is_match = hmac.compare_digest(session.pin, cleaned_pin)
+        except Exception as e:
+            log.warning("PIN comparison failed with exception for session %s: %s", session_id, e)
+            _register_failure("PIN comparison error")
+            return None
+
+        if not is_match:
+            _register_failure("Incorrect PIN")
             return None
 
         # Successful verification -> generate device credentials
