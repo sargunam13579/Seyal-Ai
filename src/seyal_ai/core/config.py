@@ -155,7 +155,7 @@ class SecurityPermissionSettings(BaseSettings):
 
 class SecuritySettings(BaseSettings):
     require_auth: bool = True
-    allow_dev_auth_bypass: bool = True
+    allow_dev_auth_bypass: bool = False
     session_timeout_minutes: int = 30
     max_high_risk_per_minute: int = 5
     audit_enabled: bool = True

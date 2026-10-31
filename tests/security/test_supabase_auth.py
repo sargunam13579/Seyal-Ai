@@ -55,15 +55,78 @@ def test_auth_status_endpoint():
     assert data["status"] == "ready"
 
 
-def test_auth_me_endpoint_dev_fallback():
+def test_allow_dev_auth_bypass_default_is_false():
+    """SecuritySettings.allow_dev_auth_bypass must strictly default to False."""
+    from seyal_ai.core.config import SecuritySettings
+
+    sec = SecuritySettings()
+    assert sec.allow_dev_auth_bypass is False
+    assert sec.require_auth is True
+
+    settings = SeyalAiSettings()
+    assert settings.security.allow_dev_auth_bypass is False
+
+
+def test_auth_me_endpoint_default_rejects_unauthenticated():
+    """By default (allow_dev_auth_bypass=False), unauthenticated requests must be rejected with 401."""
     app = create_app(SeyalAiSettings(supabase_url="https://yxvwhewzbifgttmiasas.supabase.co"))
+    client = TestClient(app)
+
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert "Missing authorization bearer token" in response.json().get("detail", "")
+
+
+def test_auth_me_endpoint_explicit_dev_bypass_allows_mock_user():
+    """Development with explicit allow_dev_auth_bypass=True behaves as intended and returns mock user."""
+    from seyal_ai.core.config import SecuritySettings
+
+    dev_settings = SeyalAiSettings(
+        environment="development",
+        supabase_url="https://yxvwhewzbifgttmiasas.supabase.co",
+        security=SecuritySettings(allow_dev_auth_bypass=True),
+    )
+    app = create_app(dev_settings)
     client = TestClient(app)
 
     response = client.get("/api/auth/me")
     assert response.status_code == 200
     data = response.json()
     assert data["authenticated"] is True
-    assert "user_id" in data
+    assert data["user_id"] == "local-dev-user-0000"
+
+
+def test_test_env_does_not_inherit_dev_bypass():
+    """Test environment must not inherit dev bypass even if allow_dev_auth_bypass is True."""
+    from seyal_ai.core.config import SecuritySettings
+
+    settings = SeyalAiSettings(
+        environment="test",
+        security=SecuritySettings(allow_dev_auth_bypass=True),
+    )
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert "Missing authorization bearer token" in response.json().get("detail", "")
+
+
+def test_invalid_or_missing_env_does_not_enable_bypass():
+    """Missing or invalid environment name must never enable authentication bypass."""
+    from seyal_ai.core.config import SecuritySettings
+
+    for invalid_env in ["", "staging", "unknown", "qa"]:
+        settings = SeyalAiSettings(
+            environment=invalid_env,
+            security=SecuritySettings(allow_dev_auth_bypass=True),
+        )
+        app = create_app(settings)
+        client = TestClient(app)
+
+        response = client.get("/api/auth/me")
+        assert response.status_code == 401
+        assert "Missing authorization bearer token" in response.json().get("detail", "")
 
 
 def test_supabase_jwt_forged_signature_rejected():

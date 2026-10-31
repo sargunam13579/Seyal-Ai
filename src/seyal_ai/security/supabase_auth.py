@@ -155,11 +155,12 @@ async def get_current_user(
         HTTPException 401 if authentication fails or bearer token is missing/invalid.
     """
     settings: SeyalAiSettings = getattr(request.app.state, "settings", get_settings())
-    is_prod = (getattr(settings, "environment", "") or "").strip().lower() == "production"
+    env = (getattr(settings, "environment", "") or "").strip().lower()
+    is_dev = env == "development"
 
     if not credentials or not credentials.credentials:
-        # Development fallback mock user ONLY if explicitly enabled and NOT in production
-        if not is_prod and getattr(settings.security, "allow_dev_auth_bypass", False):
+        # Development fallback mock user ONLY if environment is explicitly "development" AND allow_dev_auth_bypass is True
+        if is_dev and getattr(settings.security, "allow_dev_auth_bypass", False):
             return SupabaseUser({
                 "sub": "local-dev-user-0000",
                 "email": "dev@seyal.local",
