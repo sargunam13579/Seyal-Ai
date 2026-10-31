@@ -7,6 +7,7 @@ paired device registry, and authorization verification.
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import time
@@ -20,6 +21,7 @@ from seyal_ai.utils.logging import get_logger
 log = get_logger("security.pairing")
 
 PAIRING_TIMEOUT_SECONDS = 300.0  # 5 minutes
+MAX_PIN_ATTEMPTS = 5
 
 
 @dataclass
@@ -34,10 +36,16 @@ class PairingSession:
     expires_at: float = field(default_factory=lambda: time.time() + PAIRING_TIMEOUT_SECONDS)
     ip_address: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    failed_attempts: int = 0
+    max_attempts: int = MAX_PIN_ATTEMPTS
 
     @property
     def is_expired(self) -> bool:
         return time.time() > self.expires_at
+
+    @property
+    def is_exhausted(self) -> bool:
+        return self.failed_attempts >= self.max_attempts
 
 
 @dataclass
@@ -130,11 +138,11 @@ class DevicePairingManager:
         )
         self._pending_sessions[session_id] = session
         log.info(
-            "Pairing initiated for %s (%s) with PIN %s (expires in %ds)",
+            "Pairing initiated for %s (%s) (expires in %ds, max attempts: %d)",
             device_name,
             session_id,
-            pin,
             int(PAIRING_TIMEOUT_SECONDS),
+            session.max_attempts,
         )
         return session
 
@@ -146,15 +154,81 @@ class DevicePairingManager:
     ) -> PairedDevice | None:
         """
         Validate the PIN and complete pairing.
+        Enforces a strict maximum of 5 failed attempts with constant-time comparison.
         """
         self._cleanup_expired_sessions()
         session = self._pending_sessions.get(session_id)
         if not session:
-            log.warning("Pairing session %s not found or expired", session_id)
+            log.warning("Pairing session %s not found, expired, or previously invalidated", session_id)
             return None
 
-        if session.pin != pin.strip():
-            log.warning("Invalid PIN provided for pairing session %s", session_id)
+        # Check explicit expiration
+        if session.is_expired:
+            log.warning("Pairing session %s expired", session_id)
+            del self._pending_sessions[session_id]
+            return None
+
+        # If already exhausted (defense-in-depth)
+        if session.is_exhausted:
+            log.warning("Pairing session %s previously exhausted failed attempts", session_id)
+            del self._pending_sessions[session_id]
+            return None
+
+        # Validate PIN type and format
+        if not isinstance(pin, str):
+            session.failed_attempts += 1
+            if session.failed_attempts >= session.max_attempts:
+                del self._pending_sessions[session_id]
+                log.warning(
+                    "Invalid PIN type for session %s; reached %d failed attempts, session invalidated",
+                    session_id,
+                    session.failed_attempts,
+                )
+            else:
+                log.warning(
+                    "Invalid PIN type for session %s (attempt %d/%d)",
+                    session_id,
+                    session.failed_attempts,
+                    session.max_attempts,
+                )
+            return None
+
+        cleaned_pin = pin.strip()
+        if not cleaned_pin:
+            session.failed_attempts += 1
+            if session.failed_attempts >= session.max_attempts:
+                del self._pending_sessions[session_id]
+                log.warning(
+                    "Empty PIN provided for session %s; reached %d failed attempts, session invalidated",
+                    session_id,
+                    session.failed_attempts,
+                )
+            else:
+                log.warning(
+                    "Empty PIN provided for session %s (attempt %d/%d)",
+                    session_id,
+                    session.failed_attempts,
+                    session.max_attempts,
+                )
+            return None
+
+        # Constant-time comparison using hmac.compare_digest
+        if not hmac.compare_digest(session.pin, cleaned_pin):
+            session.failed_attempts += 1
+            if session.failed_attempts >= session.max_attempts:
+                del self._pending_sessions[session_id]
+                log.warning(
+                    "Incorrect PIN for session %s; reached %d failed attempts, session invalidated",
+                    session_id,
+                    session.failed_attempts,
+                )
+            else:
+                log.warning(
+                    "Incorrect PIN for session %s (attempt %d/%d)",
+                    session_id,
+                    session.failed_attempts,
+                    session.max_attempts,
+                )
             return None
 
         # Successful verification -> generate device credentials
