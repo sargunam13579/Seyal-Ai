@@ -6,7 +6,7 @@ import jwt
 from fastapi.testclient import TestClient
 
 from seyal_ai.api.app import create_app
-from seyal_ai.core.config import SeyalAiSettings
+from seyal_ai.core.config import SecuritySettings, SeyalAiSettings
 from seyal_ai.security.supabase_auth import decode_supabase_jwt, verify_supabase_token
 
 
@@ -292,3 +292,161 @@ def test_production_security_validation():
     assert prod_valid.environment == "production"
     assert prod_valid.security.require_auth is True
     assert prod_valid.security.allow_dev_auth_bypass is False
+
+
+# ===========================================================================
+# Dedicated Regression Tests for JWT Key Separation & Algorithm Restrictions
+# ===========================================================================
+
+def test_service_role_key_alone_cannot_verify_token():
+    """Configuring only supabase_service_role_key must not enable token verification."""
+    service_role_key = "my-service-role-key-that-is-32-bytes-long!"
+    payload = {
+        "sub": "user-test-service-key",
+        "email": "test@example.com",
+        "role": "authenticated",
+        "aud": "authenticated",
+        "exp": 2524608000,
+    }
+    token = jwt.encode(payload, service_role_key, algorithm="HS256")
+    settings = SeyalAiSettings(
+        supabase_jwt_secret="",
+        supabase_service_role_key=service_role_key,
+        security=SecuritySettings(supabase_jwt_secret="", supabase_service_role_key=service_role_key),
+    )
+    # Must fail closed and return None
+    assert verify_supabase_token(token, settings=settings) is None
+
+
+def test_token_signed_with_service_role_key_rejected_when_jwt_secret_missing():
+    """A token signed with service role key is rejected when JWT secret is missing."""
+    service_key = "service-role-admin-key-32-chars-long!"
+    token = jwt.encode(
+        {"sub": "attacker-001", "email": "att@evil.com", "role": "authenticated", "aud": "authenticated", "exp": 2524608000},
+        service_key,
+        algorithm="HS256",
+    )
+    settings = SeyalAiSettings(
+        supabase_jwt_secret="",
+        supabase_service_role_key=service_key,
+        security=SecuritySettings(supabase_jwt_secret="", supabase_service_role_key=service_key),
+    )
+    assert verify_supabase_token(token, settings=settings) is None
+
+
+def test_token_signed_with_service_role_key_rejected_when_jwt_secret_configured():
+    """A token signed with service role key is rejected when a legitimate JWT secret is configured."""
+    jwt_secret = "real-supabase-jwt-secret-32-bytes-long!"
+    service_key = "service-role-admin-key-32-chars-long!"
+    token = jwt.encode(
+        {"sub": "attacker-002", "email": "att@evil.com", "role": "authenticated", "aud": "authenticated", "exp": 2524608000},
+        service_key,
+        algorithm="HS256",
+    )
+    settings = SeyalAiSettings(
+        supabase_jwt_secret=jwt_secret,
+        supabase_service_role_key=service_key,
+        security=SecuritySettings(supabase_jwt_secret=jwt_secret, supabase_service_role_key=service_key),
+    )
+    assert verify_supabase_token(token, settings=settings) is None
+
+
+def test_production_startup_fails_if_jwt_secret_empty_even_with_service_role_key():
+    """Production startup must fail closed if supabase_jwt_secret is empty, even if service role key is present."""
+    import pytest
+    from seyal_ai.core.config import SecuritySettings
+
+    with pytest.raises(ValueError, match="Unsafe production configuration: Supabase JWT secret"):
+        SeyalAiSettings(
+            environment="production",
+            supabase_jwt_secret="",
+            supabase_service_role_key="service-role-key-present-32-chars-long!",
+            security=SecuritySettings(
+                require_auth=True,
+                allow_dev_auth_bypass=False,
+                supabase_jwt_secret="",
+                supabase_service_role_key="service-role-key-present-32-chars-long!",
+            ),
+        )
+
+
+def test_jwt_algorithm_none_rejected():
+    """Tokens using the 'none' algorithm must be rejected."""
+    import base64
+    import json
+
+    jwt_secret = "valid-supabase-jwt-secret-32-bytes-long!"
+    payload = {
+        "sub": "user-none-alg",
+        "email": "none@example.com",
+        "role": "authenticated",
+        "aud": "authenticated",
+        "exp": 2524608000,
+    }
+    header_b64 = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).decode().rstrip("=")
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    none_token = f"{header_b64}.{payload_b64}."
+
+    settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
+    assert verify_supabase_token(none_token, settings=settings) is None
+    assert decode_supabase_jwt(none_token, secret=jwt_secret, verify_signature=True) is None
+
+
+def test_jwt_algorithm_hs384_rejected():
+    """Tokens signed with HS384 algorithm must be rejected (only HS256 is accepted)."""
+    jwt_secret = "valid-supabase-jwt-secret-32-bytes-long!"
+    payload = {
+        "sub": "user-hs384-alg",
+        "email": "hs384@example.com",
+        "role": "authenticated",
+        "aud": "authenticated",
+        "exp": 2524608000,
+    }
+    hs384_token = jwt.encode(payload, jwt_secret, algorithm="HS384")
+    settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
+    assert verify_supabase_token(hs384_token, settings=settings) is None
+    assert decode_supabase_jwt(hs384_token, secret=jwt_secret, verify_signature=True) is None
+
+
+def test_jwt_algorithm_rs256_rejected():
+    """Tokens with RS256 algorithm must be rejected under symmetric HS256 verification."""
+    import base64
+    import json
+
+    jwt_secret = "valid-supabase-jwt-secret-32-bytes-long!"
+    header_b64 = base64.urlsafe_b64encode(json.dumps({"alg": "RS256", "typ": "JWT"}).encode()).decode().rstrip("=")
+    payload_b64 = base64.urlsafe_b64encode(json.dumps({
+        "sub": "user-rs256",
+        "email": "rs256@example.com",
+        "role": "authenticated",
+        "aud": "authenticated",
+        "exp": 2524608000,
+    }).encode()).decode().rstrip("=")
+    rs256_token = f"{header_b64}.{payload_b64}.fake-signature"
+
+    settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
+    assert verify_supabase_token(rs256_token, settings=settings) is None
+    assert decode_supabase_jwt(rs256_token, secret=jwt_secret, verify_signature=True) is None
+
+
+def test_auth_status_does_not_report_jwt_enabled_with_only_service_role_key():
+    """GET /api/auth/status must report jwt_verification_enabled: False when only service role key is set."""
+    from seyal_ai.core.config import SecuritySettings
+
+    settings = SeyalAiSettings(
+        supabase_url="https://yxvwhewzbifgttmiasas.supabase.co",
+        supabase_jwt_secret="",
+        supabase_service_role_key="service-role-key-only",
+        security=SecuritySettings(
+            supabase_url="https://yxvwhewzbifgttmiasas.supabase.co",
+            supabase_jwt_secret="",
+            supabase_service_role_key="service-role-key-only",
+        ),
+    )
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/api/auth/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["jwt_verification_enabled"] is False

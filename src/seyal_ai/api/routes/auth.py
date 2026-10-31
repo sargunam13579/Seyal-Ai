@@ -46,7 +46,6 @@ async def get_auth_status(request: Request) -> dict[str, Any]:
     has_supabase_url = bool(settings.supabase_url or settings.security.supabase_url)
     has_jwt_secret = bool(
         settings.supabase_jwt_secret
-        or settings.supabase_service_role_key
         or settings.security.supabase_jwt_secret
     )
 

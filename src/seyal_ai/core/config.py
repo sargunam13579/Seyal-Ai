@@ -273,13 +273,11 @@ class SeyalAiSettings(BaseSettings):
                 )
             jwt_secret = (
                 self.supabase_jwt_secret
-                or self.supabase_service_role_key
                 or self.security.supabase_jwt_secret
-                or self.security.supabase_service_role_key
             )
             if not jwt_secret or not jwt_secret.strip():
                 raise ValueError(
-                    "Unsafe production configuration: Supabase JWT secret (SUPABASE_JWT_SECRET or SUPABASE_SERVICE_ROLE_KEY) is required in production."
+                    "Unsafe production configuration: Supabase JWT secret ('supabase_jwt_secret') is required in production."
                 )
 
 

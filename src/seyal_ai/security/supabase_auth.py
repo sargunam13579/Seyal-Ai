@@ -58,7 +58,7 @@ def decode_supabase_jwt(
 
     Args:
         token: The raw JWT string from Authorization Bearer header.
-        secret: The SUPABASE_JWT_SECRET or SUPABASE_SERVICE_ROLE_KEY.
+        secret: The SUPABASE_JWT_SECRET signing secret.
         verify_signature: If True, validates cryptographic signature using secret.
 
     Returns:
@@ -72,7 +72,7 @@ def decode_supabase_jwt(
             payload = jwt.decode(
                 token,
                 secret,
-                algorithms=["HS256", "RS256"],
+                algorithms=["HS256"],
                 audience="authenticated",
                 options={
                     "verify_signature": True,
@@ -84,7 +84,7 @@ def decode_supabase_jwt(
             # Explicit unverified decode only when requested by caller (never for auth decisions)
             payload = jwt.decode(
                 token,
-                algorithms=["HS256", "RS256"],
+                algorithms=["HS256"],
                 options={"verify_signature": False},
             )
 
@@ -110,16 +110,14 @@ def verify_supabase_token(token: str, settings: Optional[SeyalAiSettings] = None
     """
     Verify token and return a SupabaseUser object.
     Strictly validates cryptographic signature against the configured JWT secret.
-    Never accepts unverified payloads or forged tokens.
+    Never accepts unverified payloads, forged tokens, or service role keys.
     """
     if not settings:
         settings = get_settings()
 
     jwt_secret = (
         settings.supabase_jwt_secret
-        or settings.supabase_service_role_key
         or settings.security.supabase_jwt_secret
-        or settings.security.supabase_service_role_key
     )
 
     if not jwt_secret or not jwt_secret.strip():
