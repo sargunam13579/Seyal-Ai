@@ -10,20 +10,28 @@ from seyal_ai.core.config import SecuritySettings, SeyalAiSettings
 from seyal_ai.security.supabase_auth import decode_supabase_jwt, verify_supabase_token
 
 
-def test_supabase_jwt_decoding_unverified():
-    payload = {
-        "sub": "user-123-abc",
-        "email": "test@example.com",
-        "role": "authenticated",
-        "aud": "authenticated",
-        "exp": 2524608000,  # far future timestamp
-    }
-    token = jwt.encode(payload, "test-supabase-super-secret-key-at-least-32-bytes!", algorithm="HS256")
+def test_supabase_jwt_signature_verification_cannot_be_disabled():
+    """decode_supabase_jwt cannot be instructed to disable signature verification."""
+    import inspect
+    import pytest
 
-    decoded = decode_supabase_jwt(token, secret="", verify_signature=False)
-    assert decoded is not None
-    assert decoded["sub"] == "user-123-abc"
-    assert decoded["email"] == "test@example.com"
+    # 1. Parameter signature check: verify_signature parameter must not exist
+    sig = inspect.signature(decode_supabase_jwt)
+    assert "verify_signature" not in sig.parameters
+    assert list(sig.parameters.keys()) == ["token", "secret"]
+
+    # 2. Calling with verify_signature keyword must raise TypeError
+    valid_secret = "test-supabase-super-secret-key-at-least-32-bytes!"
+    token = jwt.encode({"sub": "user-123-abc", "exp": 2524608000}, valid_secret, algorithm="HS256")
+    with pytest.raises(TypeError):
+        decode_supabase_jwt(token, valid_secret, verify_signature=False)  # type: ignore[call-arg]
+
+    # 3. Missing secret must fail closed and return None
+    assert decode_supabase_jwt(token, secret="") is None
+
+    # 4. Forged token with invalid signature must fail closed unconditionally
+    forged_token = jwt.encode({"sub": "user-123-abc", "exp": 2524608000}, "wrong-secret", algorithm="HS256")
+    assert decode_supabase_jwt(forged_token, secret=valid_secret) is None
 
 
 def test_supabase_jwt_decoding_verified():
@@ -389,7 +397,7 @@ def test_jwt_algorithm_none_rejected():
 
     settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
     assert verify_supabase_token(none_token, settings=settings) is None
-    assert decode_supabase_jwt(none_token, secret=jwt_secret, verify_signature=True) is None
+    assert decode_supabase_jwt(none_token, secret=jwt_secret) is None
 
 
 def test_jwt_algorithm_hs384_rejected():
@@ -405,7 +413,7 @@ def test_jwt_algorithm_hs384_rejected():
     hs384_token = jwt.encode(payload, jwt_secret, algorithm="HS384")
     settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
     assert verify_supabase_token(hs384_token, settings=settings) is None
-    assert decode_supabase_jwt(hs384_token, secret=jwt_secret, verify_signature=True) is None
+    assert decode_supabase_jwt(hs384_token, secret=jwt_secret) is None
 
 
 def test_jwt_algorithm_rs256_rejected():
@@ -426,7 +434,7 @@ def test_jwt_algorithm_rs256_rejected():
 
     settings = SeyalAiSettings(supabase_jwt_secret=jwt_secret)
     assert verify_supabase_token(rs256_token, settings=settings) is None
-    assert decode_supabase_jwt(rs256_token, secret=jwt_secret, verify_signature=True) is None
+    assert decode_supabase_jwt(rs256_token, secret=jwt_secret) is None
 
 
 def test_auth_status_does_not_report_jwt_enabled_with_only_service_role_key():

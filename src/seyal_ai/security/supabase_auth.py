@@ -50,43 +50,35 @@ class SupabaseUser:
 
 def decode_supabase_jwt(
     token: str,
-    secret: str = "",
-    verify_signature: bool = True,
+    secret: str,
 ) -> Optional[dict[str, Any]]:
     """
-    Decode and verify a Supabase JWT token.
+    Decode and cryptographically verify a Supabase JWT token.
+    Signature verification is mandatory and cannot be bypassed.
 
     Args:
         token: The raw JWT string from Authorization Bearer header.
         secret: The SUPABASE_JWT_SECRET signing secret.
-        verify_signature: If True, validates cryptographic signature using secret.
 
     Returns:
         Decoded payload dictionary or None if invalid/unverified.
     """
+    if not secret or not secret.strip():
+        log.warning("Cannot verify Supabase JWT: secret is missing or empty")
+        return None
+
     try:
-        if verify_signature:
-            if not secret or not secret.strip():
-                log.warning("Cannot verify Supabase JWT: secret is missing or empty")
-                return None
-            payload = jwt.decode(
-                token,
-                secret,
-                algorithms=["HS256"],
-                audience="authenticated",
-                options={
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_aud": True,
-                },
-            )
-        else:
-            # Explicit unverified decode only when requested by caller (never for auth decisions)
-            payload = jwt.decode(
-                token,
-                algorithms=["HS256"],
-                options={"verify_signature": False},
-            )
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            options={
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_aud": True,
+            },
+        )
 
         # Validate that the sub (user ID) claim exists and is non-empty
         sub = payload.get("sub")
@@ -128,7 +120,6 @@ def verify_supabase_token(token: str, settings: Optional[SeyalAiSettings] = None
     payload = decode_supabase_jwt(
         token,
         secret=jwt_secret,
-        verify_signature=True,
     )
 
     if not payload:
