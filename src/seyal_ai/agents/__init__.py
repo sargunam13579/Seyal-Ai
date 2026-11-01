@@ -8,18 +8,30 @@ Houses the 5 core AI Agent capabilities:
 5. multi_agent  — Multi-Agent AI Company Coordinator
 """
 
-from seyal_ai.agents.computer_use.agent import ConversationalComputerUseAgent
+from seyal_ai.agents.browser.agent import BrowserAgent
+from seyal_ai.agents.computer_use.agent import (
+    ComputerUseAgent,
+    ConversationalComputerUseAgent,
+)
+from seyal_ai.agents.devices.agent import AndroidDeviceAgent
 from seyal_ai.agents.life_os.agent import PersonalLifeOsAgent
 from seyal_ai.agents.multi_agent.agent import MultiAgentCompanyCoordinator
 from seyal_ai.agents.personal.agent import UniversalPersonalAgent
 from seyal_ai.agents.research.agent import AutonomousResearchAgent
+from seyal_ai.agents.terminal.agent import TerminalAgent
+from seyal_ai.agents.vision.agent import VisionAgent
 
 __all__ = [
+    "AndroidDeviceAgent",
+    "BrowserAgent",
     "ConversationalComputerUseAgent",
+    "ComputerUseAgent",
     "UniversalPersonalAgent",
     "AutonomousResearchAgent",
     "PersonalLifeOsAgent",
     "MultiAgentCompanyCoordinator",
+    "TerminalAgent",
+    "VisionAgent",
 ]
 
 # Backward compatibility alias for laptop agent (now consolidated under computer_use.laptop)

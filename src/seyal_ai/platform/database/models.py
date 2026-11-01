@@ -360,7 +360,49 @@ class SyncOutbox(Base):
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)  # "PENDING", "SYNCED", "FAILED"
 
     def __repr__(self) -> str:
         return f"<SyncOutbox(entity={self.entity_type!r}, id={self.entity_id!r}, action={self.action!r})>"
+
+
+# ---------------------------------------------------------------------------
+# Idempotency & Revision Conflict State Machine
+# ---------------------------------------------------------------------------
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    operation_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    client_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempt_index: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    base_rev_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING", nullable=False)  # PENDING, APPLIED, CONFLICT_DETECTED, AWAITING_RETRY, FAILED
+    result_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<IdempotencyRecord(op_id={self.operation_id!r}, status={self.status!r}, attempt={self.attempt_index})>"
+
+
+# ---------------------------------------------------------------------------
+# Worker Fencing & Advisory Lock Token
+# ---------------------------------------------------------------------------
+
+
+class FencingTokenRecord(Base):
+    __tablename__ = "fencing_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_id)
+    scope: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    current_token: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    holder_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    def __repr__(self) -> str:
+        return f"<FencingTokenRecord(scope={self.scope!r}, token={self.current_token})>"
+
 

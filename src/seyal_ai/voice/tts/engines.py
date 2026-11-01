@@ -276,6 +276,121 @@ class Pyttsx3TTSProvider(BaseTTSProvider):
             return []
 
 
+class KokoroTTSProvider(BaseTTSProvider):
+    """
+    High-fidelity neural Text-to-Speech powered by Kokoro-82M.
+    Supports fast local inference (<100ms latency) and ONNX runtime.
+    """
+
+    def __init__(
+        self,
+        voice: str = "af_heart",
+        speed: float = 1.0,
+        model_path: str | None = None,
+    ) -> None:
+        self._voice = voice or "af_heart"
+        self._speed = speed
+        self._model_path = model_path
+        self._pipeline: Any = None
+
+    @property
+    def provider_name(self) -> str:
+        return "Kokoro (Neural TTS)"
+
+    def _ensure_pipeline(self) -> Any:
+        if self._pipeline is not None:
+            return self._pipeline
+
+        try:
+            from kokoro import KPipeline  # type: ignore[import-not-found]
+
+            lang_code = "a" if not self._voice.startswith("b") else "b"
+            self._pipeline = KPipeline(lang_code=lang_code)
+            log.info("Kokoro KPipeline initialized for voice '%s'", self._voice)
+            return self._pipeline
+        except ImportError:
+            try:
+                from kokoro_onnx import Kokoro  # type: ignore[import-not-found]
+
+                self._pipeline = Kokoro(
+                    model_path=self._model_path or "kokoro-v0_19.onnx",
+                    voices_path="voices.json",
+                )
+                log.info("Kokoro ONNX initialized successfully")
+                return self._pipeline
+            except ImportError as e:
+                raise TTSError(f"Neither 'kokoro' nor 'kokoro_onnx' library is installed: {e}") from e
+
+    async def synthesize(
+        self,
+        text: str,
+        voice: str = "auto",
+        speed: float = 1.0,
+    ) -> bytes:
+        if not text or not text.strip():
+            return b""
+
+        active_voice = self._voice if voice in ("auto", "", None) else voice
+        active_speed = speed or self._speed or 1.0
+
+        def _do_synthesize() -> bytes:
+            pipe = self._ensure_pipeline()
+            import io
+            import wave
+            import numpy as np
+
+            if hasattr(pipe, "create") and getattr(type(pipe), "__name__", "") == "Kokoro":
+                samples, sr = pipe.create(text, voice=active_voice, speed=active_speed)
+            else:
+                generator = pipe(text, voice=active_voice, speed=active_speed, split_pattern=r"\n+")
+                audio_chunks: list[np.ndarray] = []
+                sr = 24000
+                for item in generator:
+                    if isinstance(item, (tuple, list)):
+                        audio = item[2] if len(item) == 3 else item[0]
+                    else:
+                        audio = item
+                    if audio is not None and len(audio) > 0:
+                        audio_chunks.append(audio)
+                if not audio_chunks:
+                    raise TTSError("Kokoro synthesis yielded no audio chunks")
+                samples = np.concatenate(audio_chunks)
+
+            if samples.dtype != np.int16:
+                samples_clamped = np.clip(samples, -1.0, 1.0)
+                int_audio = (samples_clamped * 32767).astype(np.int16)
+            else:
+                int_audio = samples
+
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sr)
+                wf.writeframes(int_audio.tobytes())
+            return buf.getvalue()
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _do_synthesize)
+
+    async def check_availability(self) -> bool:
+        import importlib.util
+
+        return (
+            importlib.util.find_spec("kokoro") is not None
+            or importlib.util.find_spec("kokoro_onnx") is not None
+        )
+
+    async def list_voices(self) -> list[dict[str, str]]:
+        return [
+            {"id": "af_heart", "name": "Heart (US Female)", "language": "en-US", "gender": "female"},
+            {"id": "af_bella", "name": "Bella (US Female)", "language": "en-US", "gender": "female"},
+            {"id": "am_michael", "name": "Michael (US Male)", "language": "en-US", "gender": "male"},
+            {"id": "bf_emma", "name": "Emma (UK Female)", "language": "en-GB", "gender": "female"},
+            {"id": "bm_george", "name": "George (UK Male)", "language": "en-GB", "gender": "male"},
+        ]
+
+
 class TTSEngine:
     """Text-to-Speech engine with provider abstraction and interruption support.
 
@@ -310,6 +425,9 @@ class TTSEngine:
         elif self._provider_name == "pyttsx3":
             self._provider = Pyttsx3TTSProvider()
             self._fallback_provider = None
+        elif self._provider_name == "kokoro":
+            self._provider = KokoroTTSProvider(voice=self._voice, speed=self._speed)
+            self._fallback_provider = EdgeTTSProvider()
         else:
             log.warning(
                 "Unknown TTS provider '%s', falling back to edge",

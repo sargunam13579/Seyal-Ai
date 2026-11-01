@@ -231,6 +231,15 @@ class VoicePipeline:
         )
         log.info("Voice pipeline stopped")
 
+    def handle_barge_in(self) -> bool:
+        """Handle acoustic barge-in interruption immediately (<50ms cut-off)."""
+        if self._interrupt_enabled and (self._player.is_playing or self._state == PipelineState.SPEAKING):
+            log.info("User interrupted (acoustic barge-in) — stopping TTS playback")
+            self._player.stop()
+            self._tts.request_stop()
+            return True
+        return False
+
     async def _listen_loop(self) -> None:
         """Main listening loop — runs continuously while the pipeline is active."""
         log.debug("Listen loop started")
@@ -264,10 +273,7 @@ class VoicePipeline:
                         )
 
                         # If currently speaking, interrupt immediately (<50ms acoustic barge-in)!
-                        if self._interrupt_enabled and (self._player.is_playing or self._state == PipelineState.SPEAKING):
-                            log.info("User interrupted (acoustic barge-in) — stopping TTS playback")
-                            self._player.stop()
-                            self._tts.request_stop()
+                        self.handle_barge_in()
 
                 elif vad_result == VADState.SILENCE:
                     # End of speech — get the segment and process in decoupled task

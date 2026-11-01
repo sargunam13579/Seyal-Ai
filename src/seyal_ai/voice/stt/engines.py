@@ -347,6 +347,164 @@ class VoskSTTProvider(BaseSTTProvider):
         return importlib.util.find_spec("vosk") is not None
 
 
+class WhisperSTTProvider(BaseSTTProvider):
+    """Speech-to-Text provider powered by OpenAI Whisper (local neural model or API)."""
+
+    def __init__(
+        self,
+        model_size: str = "base",
+        api_key: str | None = None,
+        use_api: bool = False,
+    ) -> None:
+        self._model_size = model_size
+        self._api_key = api_key
+        self._use_api = use_api
+        self._local_model: Any = None
+
+    @property
+    def provider_name(self) -> str:
+        return "Whisper (Neural STT)"
+
+    def _ensure_local_model(self) -> Any:
+        if self._local_model is not None:
+            return self._local_model
+
+        try:
+            import whisper  # type: ignore[import-not-found]
+
+            self._local_model = whisper.load_model(self._model_size)
+            log.info("Whisper local model '%s' loaded successfully", self._model_size)
+            return self._local_model
+        except ImportError:
+            try:
+                from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+
+                self._local_model = WhisperModel(self._model_size, device="cpu", compute_type="int8")
+                log.info("faster-whisper model '%s' loaded successfully", self._model_size)
+                return self._local_model
+            except ImportError as e:
+                raise STTError("Neither 'whisper' nor 'faster-whisper' package is installed.") from e
+
+    async def transcribe(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+        language: str = "auto",
+    ) -> str:
+        res = await self.transcribe_with_language(audio_data, sample_rate, language)
+        return res.text
+
+    async def transcribe_with_language(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+        language: str = "auto",
+        fast_interim: bool = False,
+    ) -> TranscriptionResult:
+        from seyal_ai.core.config import get_settings
+
+        settings = get_settings()
+        api_key: str | None = self._api_key or getattr(settings, "openai_api_key", None)
+
+        if (self._use_api or not self._is_local_available()) and api_key:
+            return await self._transcribe_api(audio_data, sample_rate, language, api_key)
+
+        return await self._transcribe_local(audio_data, sample_rate, language)
+
+    async def _transcribe_local(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int = 16000,
+        language: str = "auto",
+    ) -> TranscriptionResult:
+        def _run_local() -> TranscriptionResult:
+            model = self._ensure_local_model()
+
+            if audio_data.dtype == np.int16:
+                audio_float = audio_data.astype(np.float32) / 32768.0
+            else:
+                audio_float = audio_data.astype(np.float32)
+
+            lang_param = None if language in ("auto", "", None) else language.split("-")[0]
+
+            if hasattr(model, "transcribe"):
+                result = model.transcribe(audio_float, language=lang_param)
+                if isinstance(result, tuple):
+                    segments, info = result
+                    text = " ".join([seg.text for seg in segments]).strip()
+                    detected_lang = getattr(info, "language", "en")
+                elif isinstance(result, dict):
+                    text = result.get("text", "").strip()
+                    detected_lang = result.get("language", "en")
+                else:
+                    text = str(result).strip()
+                    detected_lang = "en"
+            else:
+                text = ""
+                detected_lang = "en"
+
+            sanitized = sanitize_transcribed_text(text)
+            classified_lang = detect_text_language(sanitized)
+            return TranscriptionResult(
+                text=sanitized,
+                language=classified_lang or detected_lang,
+                confidence=0.95,
+            )
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _run_local)
+
+    async def _transcribe_api(
+        self,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        language: str,
+        api_key: str,
+    ) -> TranscriptionResult:
+        try:
+            import httpx
+
+            wav_bytes = _audio_to_wav_bytes(audio_data, sample_rate)
+            files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+            data: dict[str, Any] = {"model": "whisper-1"}
+            if language not in ("auto", "", None):
+                data["language"] = language.split("-")[0]
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files=files,
+                    data=data,
+                )
+                if resp.status_code != 200:
+                    raise STTError(f"Whisper API error ({resp.status_code}): {resp.text}")
+                result = resp.json()
+                raw_text = result.get("text", "").strip()
+                sanitized = sanitize_transcribed_text(raw_text)
+                lang = detect_text_language(sanitized)
+                return TranscriptionResult(text=sanitized, language=lang, confidence=0.95)
+        except Exception as e:
+            if isinstance(e, STTError):
+                raise
+            raise STTError(f"Whisper API transcription failed: {e}") from e
+
+    def _is_local_available(self) -> bool:
+        import importlib.util
+
+        return (
+            importlib.util.find_spec("whisper") is not None
+            or importlib.util.find_spec("faster_whisper") is not None
+        )
+
+    async def check_availability(self) -> bool:
+        from seyal_ai.core.config import get_settings
+
+        settings = get_settings()
+        api_key = self._api_key or getattr(settings, "openai_api_key", None)
+        return self._is_local_available() or bool(api_key)
+
+
 class STTEngine:
     """Speech-to-Text engine with provider abstraction and automatic language detection."""
 
@@ -378,6 +536,8 @@ class STTEngine:
             self._provider = GoogleWebSTTProvider()
         elif self._provider_name == "vosk":
             self._provider = VoskSTTProvider(model_path=self._vosk_model_path)
+        elif self._provider_name == "whisper":
+            self._provider = WhisperSTTProvider()
         else:
             log.warning("Unknown STT provider '%s', falling back to google_web", self._provider_name)
             self._provider = GoogleWebSTTProvider()

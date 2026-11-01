@@ -604,6 +604,40 @@ class DatabaseSyncManager:
             except Exception as e:
                 log.debug("Sync worker loop error: %s", e)
 
+    async def prune_synced_outbox(self, older_than_days: int = 7) -> int:
+        """Purge synced or obsolete outbox rows older than the specified retention window."""
+        from datetime import timedelta
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=older_than_days)
+        async with get_session() as session:
+            stmt = delete(SyncOutbox).where(
+                (SyncOutbox.status == "SYNCED") & (SyncOutbox.created_at < cutoff)
+            )
+            result = await session.execute(stmt)
+            count = getattr(result, "rowcount", 0) or 0
+            log.info("Pruned %d historical sync outbox entries older than %d days", count, older_than_days)
+            return count
+
+    async def queue_outbox_item(
+        self,
+        entity_type: str,
+        entity_id: str,
+        action: str,
+        payload: dict[str, Any] | None = None,
+    ) -> SyncOutbox:
+        """Atomically insert a new outbox entry to be synchronized."""
+        async with get_session() as session:
+            entry = SyncOutbox(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                action=action,
+                payload=payload,
+                status="PENDING",
+            )
+            session.add(entry)
+            await session.flush()
+            return entry
+
 
 # Global singleton instance
 sync_manager = DatabaseSyncManager()
+

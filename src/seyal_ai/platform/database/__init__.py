@@ -25,6 +25,8 @@ from seyal_ai.platform.database.models import (
     Preference,
     Session,
     SyncOutbox,
+    IdempotencyRecord,
+    FencingTokenRecord,
     ToolCall,
     ToolResult,
     User,
@@ -49,6 +51,8 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "SyncOutbox",
+    "IdempotencyRecord",
+    "FencingTokenRecord",
     "AuditLog",
     "Device",
     "DeviceState",
@@ -59,3 +63,4 @@ __all__ = [
     "DatabaseSyncManager",
     "sync_manager",
 ]
+

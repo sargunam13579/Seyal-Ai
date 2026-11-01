@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from seyal_ai.platform.database.models import AuditLog
+from seyal_ai.platform.security.redaction import sanitize_payload
 
 
 class AuditRepository:
@@ -29,12 +30,13 @@ class AuditRepository:
         risk_level: str = "low",
         session_id: str | None = None,
     ) -> AuditLog:
-        """Record an action in the audit log."""
+        """Record an action in the audit log with mandatory boundary sanitization."""
+        clean_params = sanitize_payload(parameters) if parameters is not None else None
         entry = AuditLog(
             session_id=session_id,
             action_type=action_type,
             tool_name=tool_name,
-            parameters=parameters,
+            parameters=clean_params,
             result_status=result_status,
             risk_level=risk_level,
         )

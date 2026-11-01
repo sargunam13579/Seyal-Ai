@@ -19,6 +19,7 @@ from .engines import (
     GeminiMultilingualSTTProvider,
     GoogleWebSTTProvider,
     VoskSTTProvider,
+    WhisperSTTProvider,
     STTEngine,
 )
 
@@ -30,6 +31,7 @@ __all__ = [
     "GeminiMultilingualSTTProvider",
     "GoogleWebSTTProvider",
     "VoskSTTProvider",
+    "WhisperSTTProvider",
     "detect_text_language",
     "sanitize_transcribed_text",
     "_TANGLISH_MARKERS",

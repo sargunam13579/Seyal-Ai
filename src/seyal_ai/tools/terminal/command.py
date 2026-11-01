@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from seyal_ai.security.terminal_security import (
+from seyal_ai.platform.security.terminal_security import (
     CommandSafetyStatus,
     TerminalSecurityClassifier,
 )
